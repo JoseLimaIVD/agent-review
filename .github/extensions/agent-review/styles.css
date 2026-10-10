@@ -226,6 +226,7 @@ main { width: 100%; max-width: none; padding: 20px 20px 36px; }
 }
 .source-risk-heading { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .source-risk-heading strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .8125rem; }
+.source-risk-copy { flex: 1 0 100%; color: var(--cp-text-muted); font-size: .75rem; line-height: 1.45; }
 .source-risk-reasons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .source-risk-reasons span {
   padding: 2px 7px;
@@ -1692,6 +1693,7 @@ html { scrollbar-gutter: stable; }
 .card-heading { flex-wrap: wrap; }
 .impact-score { white-space: nowrap; font-size: 11px; }
 .package-declaration-note { padding: 8px 12px; border-left: 3px solid var(--cp-link); background: color-mix(in srgb, var(--cp-link) 6%, var(--cp-surface)); font-size: 13px; line-height: 1.5; }
+.package-description { margin-top: 8px; max-width: 80ch; font-size: 13px; line-height: 1.5; }
 .stat-value .external-link { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
 .evidence-sources { display: grid; gap: 4px; padding-left: 18px; }
 .source-error { color: var(--cp-warning); }
