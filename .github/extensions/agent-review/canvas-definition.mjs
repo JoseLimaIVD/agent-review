@@ -3,7 +3,7 @@ export const canvasDefinition = {
     displayName: "Agent Review",
     description: "Understand Python, JavaScript/TypeScript, C#/.NET, Go, and Rust changes from architecture to deterministic source evidence.",
     inputSchema: {
-        type: "object",
+        type: ["object", "null"],
         properties: {
             repoPath: { type: "string", description: "Repository path. Defaults to the Copilot workspace." },
             baseRef: { type: "string", description: "Optional base branch or ref override." },
