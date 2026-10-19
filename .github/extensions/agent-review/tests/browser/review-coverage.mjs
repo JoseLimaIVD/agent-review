@@ -7,8 +7,11 @@ const url = process.env.AGENT_REVIEW_UX_URL;
 if (!url) throw new Error("Set AGENT_REVIEW_UX_URL to an actual review with supplied line coverage.");
 const snapshot = await fetch(new URL("/api/state", url)).then((response) => response.json());
 const coverage = snapshot.model.coverage;
-const file = coverage?.files?.find((item) => coverage.changed_lines?.[item.path]?.total && item.missing_lines?.length);
+const missingLines = (item) => item.missing_lines
+    || (item.executable_lines || []).filter((line) => !(item.covered_lines || []).includes(line));
+const file = coverage?.files?.find((item) => coverage.changed_lines?.[item.path]?.total && missingLines(item).length);
 if (!file) throw new Error("This review has no changed file with measured uncovered lines.");
+file.missing_lines = missingLines(file);
 const progress = new URL("/api/review-progress", url);
 const original = await fetch(progress).then((response) => response.json());
 const { chromium } = createRequire(process.env.AGENT_REVIEW_BROWSER_PACKAGE || import.meta.url)("playwright-core");

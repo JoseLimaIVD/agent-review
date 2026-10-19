@@ -26,8 +26,10 @@ function lineCoverage(model, candidates) {
         files: paths.map((path) => {
             const file = files.get(path);
             const changed = model.coverage.changed_lines?.[path];
-            return { path, executed_line_count: (file.covered_lines || []).length,
-                not_executed_lines: lineRanges(file.missing_lines || [], 80),
+            const covered = new Set(file.covered_lines || []);
+            const missing = file.missing_lines || (file.executable_lines || []).filter((line) => !covered.has(line));
+            return { path, executed_line_count: covered.size,
+                not_executed_lines: lineRanges(missing, 80),
                 ...(changed ? { changed_lines: { executed: changed.covered, total: changed.total,
                     executed_lines: lineRanges(changed.covered_lines || [], 80),
                     not_executed: lineRanges(changed.uncovered_lines || [], 80) } } : {}) };

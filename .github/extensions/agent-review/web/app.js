@@ -2987,7 +2987,10 @@ function renderMarkdown(container, markdown, options = {}) {
     const flushList = () => {
         list = null;
     };
-    for (const rawLine of lines) {
+    const tableCells = (line) => line.replace(/^\|/, "").replace(/\|$/, "").split(/(?<!\\)\|/).map((cell) => cell.trim().replace(/\\\|/g, "|"));
+    const tableSeparator = /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?$/;
+    for (let index = 0; index < lines.length; index++) {
+        const rawLine = lines[index];
         const line = rawLine.trim();
         if (line.startsWith("```")) {
             flushParagraph();
@@ -3010,6 +3013,38 @@ function renderMarkdown(container, markdown, options = {}) {
                 container.append(pre);
             }
             flushList();
+            continue;
+        }
+        if (line.startsWith("|") && tableSeparator.test(lines[index + 1]?.trim() || "")) {
+            flushParagraph();
+            flushList();
+            const header = tableCells(line);
+            const wrap = el("div", "markdown-table-wrap");
+            const table = el("table", "markdown-table");
+            const head = el("tr", "");
+            for (const cell of header) {
+                const th = el("th", "");
+                appendInlineMarkdown(th, cell, options);
+                head.append(th);
+            }
+            const thead = el("thead", "");
+            thead.append(head);
+            const tbody = el("tbody", "");
+            index += 2;
+            for (; index < lines.length && lines[index].trim().startsWith("|"); index++) {
+                const row = el("tr", "");
+                const cells = tableCells(lines[index].trim());
+                for (let column = 0; column < header.length; column++) {
+                    const td = el("td", "");
+                    appendInlineMarkdown(td, cells[column] || "", options);
+                    row.append(td);
+                }
+                tbody.append(row);
+            }
+            index--;
+            table.append(thead, tbody);
+            wrap.append(table);
+            container.append(wrap);
             continue;
         }
         const listItem = /^(?:[-*]|\d+[.)])\s+(.+)$/.exec(line);
@@ -3081,7 +3116,9 @@ function renderAnnotation(item, annotation, loading = false) {
     const risk = extractRisk(annotation.body);
     if (risk) {
         const banner = el("div", `risk-banner risk-banner-${risk.level}`);
-        banner.append(el("b", "", `AI assessment: ${risk.level} risk`), el("span", "", risk.reason));
+        const reason = el("span", "");
+        appendInlineMarkdown(reason, risk.reason, { sourceReferences: false });
+        banner.append(el("b", "", `AI assessment: ${risk.level} risk`), reason);
         panel.append(banner);
     }
     const body = revealOnce(el("div", "annotation-body"), `annotation:${item.id}`);
@@ -3208,10 +3245,11 @@ function coverageLines(path) {
     if (!path || !model?.coverage?.available) return null;
     let byPath = coverageLineCache.get(model);
     if (!byPath) {
-        byPath = new Map((model.coverage.files || []).map((file) => [file.path, new Map([
-            ...(file.covered_lines || []).map((line) => [line, "covered"]),
-            ...(file.missing_lines || []).map((line) => [line, "uncovered"]),
-        ])]));
+        byPath = new Map((model.coverage.files || []).map((file) => {
+            const covered = new Set(file.covered_lines || []);
+            const missing = file.missing_lines || (file.executable_lines || []).filter((line) => !covered.has(line));
+            return [file.path, new Map([...[...covered].map((line) => [line, "covered"]), ...missing.map((line) => [line, "uncovered"])])];
+        }));
         coverageLineCache.set(model, byPath);
     }
     return byPath.get(path) || null;

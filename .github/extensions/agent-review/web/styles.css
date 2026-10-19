@@ -2136,3 +2136,8 @@ body.reviewing.review-source-focus .source-body { grid-template-columns: minmax(
   .file-review-footer { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .file-review-footer label, .file-review-footer input { grid-column: 1 / -1; }
 }
+.markdown-table-wrap { max-width: 100%; overflow-x: auto; margin: 8px 0; }
+.markdown-table { border-collapse: collapse; font-size: 12px; min-width: 100%; }
+.markdown-table th, .markdown-table td { padding: 4px 8px; border: 1px solid var(--cp-border); text-align: left; vertical-align: top; }
+.markdown-table th { background: var(--cp-bg-elevated); font-weight: 600; }
+.markdown-table tbody tr:nth-child(even) { background: var(--cp-bg-elevated); }

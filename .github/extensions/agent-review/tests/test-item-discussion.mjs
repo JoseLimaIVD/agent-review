@@ -190,6 +190,9 @@ test("questions carry validated viewed ranges without changing their pinned item
     assert.match(discussionPrompt(input), /never claim coverage is unsupplied when it is measured/);
     assert.equal(discussionContext(model, context, [], "Coverage?").line_coverage.status, "unavailable");
     assert.equal(discussionContext({ ...covered, coverage: { available: true, files: [] } }, context, [], "Coverage?").line_coverage.status, "not_measured");
+    const derived = discussionContext({ ...model, coverage: { available: true, files: [{ path: "a.js", covered_lines: [1, 2, 4],
+        executable_lines: [1, 2, 3, 4, 5] }] } }, context, [], "Coverage?");
+    assert.equal(derived.line_coverage.files[0].not_executed_lines, "3, 5", "reports without missing_lines derive them from executable lines");
 });
 test("blank schema placeholder requests never fail a grounded answer", () => {
     const input = discussionContext(model, context, [], "Explain.");
