@@ -2036,7 +2036,7 @@ body:not(.reviewing) .workspace, body:not(.reviewing) #source-panel { display: n
 body.reviewing > .topbar { display: none; }
 body.reviewing .review-workflow { position: fixed; inset: 0 0 auto; }
 body.reviewing main > :not(.workspace):not(#source-panel):not(#session-history-panel):not(#error):not(#connection-notice):not(#worktree-notice) { display: none !important; }
-body.reviewing .workspace { position: fixed; inset: var(--workspace-top, var(--workflow-height)) 0 0 var(--workspace-navigation-width); min-height: 0; margin: 0; border: 0; border-radius: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 320px); overflow: hidden; }
+body.reviewing .workspace { position: fixed; inset: var(--workspace-top, var(--workflow-height)) 0 0 var(--workspace-navigation-width); width: auto; min-height: 0; margin: 0; border: 0; border-radius: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 320px); overflow: hidden; }
 body.reviewing .workspace.detail-collapsed { grid-template-columns: minmax(0, 1fr); }
 body.reviewing .workspace > .rail, body.reviewing #rail-resize { display: none; }
 body.reviewing .graph-panel { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
@@ -2048,6 +2048,10 @@ body.reviewing .graph-controls { min-width: 0; max-width: 100%; flex: 1 1 280px;
 body.reviewing .graph-controls > * { max-width: 100%; }
 body.reviewing .graph-controls input[type="search"] { min-width: 80px; flex: 1; }
 body.reviewing #graph { flex: 1; min-height: 0; overflow: auto; }
+body.reviewing .workspace.impact-mode #graph { display: flex; flex-direction: column; overflow: auto; }
+body.reviewing .workspace.impact-mode .impact-toolbar { flex: 0 0 auto; }
+body.reviewing .workspace.impact-mode .impact-graph { flex: 1 1 auto; min-height: 360px; overflow: hidden; }
+body.reviewing .workspace.impact-mode .impact-graph svg { min-height: 0; }
 body.reviewing:not(.workspace-exploring) .graph-panel > .panel-heading { display: none; }
 body.reading-source .workspace { visibility: hidden; }
 body.reviewing #source-panel { top: var(--workspace-top, var(--workflow-height)); left: var(--workspace-navigation-width); z-index: 100; }

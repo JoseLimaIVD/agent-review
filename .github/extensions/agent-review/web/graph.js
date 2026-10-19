@@ -23,17 +23,31 @@ function wrapLabel(value, max = 24) {
 
 const NODE_CELL_WIDTH = 216;
 const NODE_CELL_HEIGHT = 184;
+const IMPACT_ASPECT = 1.7;
+
+function impactLanes(nodes) {
+    return [nodes.filter((node) => node.impact_role === "Dependency"),
+        nodes.filter((node) => ["Changed focus", "Selected focus"].includes(node.impact_role)),
+        nodes.filter((node) => !["Dependency", "Changed focus", "Selected focus"].includes(node.impact_role))];
+}
+
+// Wrap long impact lanes into extra columns so the whole slice approximates a wide pane instead of one tall column.
+function impactRows(nodes) {
+    const sizes = impactLanes(nodes).map((lane) => lane.length).filter(Boolean);
+    let best = Math.max(1, ...sizes);
+    let bestScore = Infinity;
+    for (let rows = 1; rows <= Math.max(1, ...sizes); rows++) {
+        const columns = sizes.reduce((sum, size) => sum + Math.ceil(size / rows), 0);
+        const score = Math.abs(Math.log((columns * NODE_CELL_WIDTH) / (rows * NODE_CELL_HEIGHT) / IMPACT_ASPECT));
+        if (score < bestScore) { best = rows; bestScore = score; }
+    }
+    return best;
+}
 
 function graphHeight(nodeCount, width, nodes = []) {
     if (nodes.some((node) => node.impact_role)) {
         if (width < 650) return Math.max(440, nodeCount * NODE_CELL_HEIGHT);
-        const groups = new Map();
-        for (const node of nodes) {
-            const group = node.impact_role === "Selected focus" ? "Changed focus"
-                : ["Dependency", "Changed focus"].includes(node.impact_role) ? node.impact_role : "consumer";
-            groups.set(group, (groups.get(group) || 0) + 1);
-        }
-        return Math.max(440, Math.max(...groups.values()) * NODE_CELL_HEIGHT);
+        return Math.max(440, impactRows(nodes) * NODE_CELL_HEIGHT);
     }
     const columns = Math.max(1, Math.floor(width / NODE_CELL_WIDTH));
     return Math.max(440, Math.ceil(nodeCount / columns) * NODE_CELL_HEIGHT);
@@ -41,17 +55,32 @@ function graphHeight(nodeCount, width, nodes = []) {
 
 function layout(nodes, width, height) {
     if (nodes.some((node) => node.impact_role)) {
-        const groups = [nodes.filter((node) => node.impact_role === "Dependency"),
-            nodes.filter((node) => ["Changed focus", "Selected focus"].includes(node.impact_role)),
-            nodes.filter((node) => !["Dependency", "Changed focus", "Selected focus"].includes(node.impact_role))];
-        let offset = 0;
+        const groups = impactLanes(nodes);
+        if (width < 650) {
+            let offset = 0;
+            return new Map(groups.flatMap((group) => {
+                const points = group.map((node, index) => [node.id, savedPositions.get(`impact:${node.id}`) || {
+                    x: width / 2, y: (offset + index) * NODE_CELL_HEIGHT + NODE_CELL_HEIGHT / 2,
+                }]);
+                offset += group.length;
+                return points;
+            }));
+        }
+        const rows = impactRows(nodes);
+        const laneColumns = groups.map((group) => group.length ? Math.ceil(group.length / rows) : 0);
+        const totalColumns = Math.max(1, laneColumns.reduce((sum, value) => sum + value, 0));
+        const cellWidth = Math.max(NODE_CELL_WIDTH, width / totalColumns);
+        let column = 0;
         return new Map(groups.flatMap((group, lane) => {
-            const points = group.map((node, index) => [node.id, savedPositions.get(`impact:${node.id}`) || {
-                x: width >= 650 ? width * (lane + .5) / 3 : width / 2,
-                y: width >= 650 ? height * (index + 1) / (group.length + 1) : (offset + index) * NODE_CELL_HEIGHT + NODE_CELL_HEIGHT / 2,
-            }]);
-            offset += group.length;
-            return points;
+            const start = column;
+            column += laneColumns[lane];
+            return group.map((node, index) => {
+                const wrapped = group.length > rows;
+                const row = wrapped ? index % rows : index;
+                const x = (start + (wrapped ? Math.floor(index / rows) : 0) + .5) * cellWidth;
+                const y = wrapped ? (row + .5) * height / rows : height * (index + 1) / (group.length + 1);
+                return [node.id, savedPositions.get(`impact:${node.id}`) || { x, y }];
+            });
         }));
     }
     const columns = Math.min(nodes.length, Math.max(1, Math.floor(width / NODE_CELL_WIDTH)));
@@ -101,18 +130,22 @@ export function resizeGraph(container) {
     graphResizers.get(container.querySelector("svg.graph-canvas"))?.();
 }
 
-export function renderGraph(container, nodes, edges, onSelect) {
+export function renderGraph(container, nodes, edges, onSelect, { viewport: fixedViewport = false, focusId = null, emptyText = "No items at this level." } = {}) {
     container.replaceChildren();
     if (!nodes.length) {
         const empty = document.createElement("div");
         empty.className = "graph-empty";
-        empty.textContent = "No items at this level.";
+        empty.textContent = emptyText;
         container.append(empty);
         return;
     }
     let width = Math.max(container.clientWidth || 320, 320);
     let height = graphHeight(nodes.length, width, nodes);
-    const root = svg("svg", { viewBox: `0 0 ${width} ${height}`, role: "img", class: "graph-canvas" });
+    // A fixed viewport keeps large impact slices pannable/zoomable instead of growing a page-tall canvas.
+    const canvasHeightFor = () => fixedViewport ? Math.max(container.clientHeight || 0, 360) : height;
+    let canvasHeight = canvasHeightFor();
+    const root = svg("svg", { viewBox: `0 0 ${width} ${canvasHeight}`, role: "img", class: "graph-canvas" });
+    if (fixedViewport) root.style.height = `${canvasHeight}px`;
     const defs = svg("defs");
     const marker = svg("marker", {
         id: "arrow", viewBox: "0 0 10 10", refX: 8, refY: 5,
@@ -170,26 +203,45 @@ export function renderGraph(container, nodes, edges, onSelect) {
         point.y = event.clientY;
         return point.matrixTransform(root.getScreenCTM().inverse());
     };
-    const zoomAt = (factor, point = { x: width / 2, y: height / 2 }) => {
+    const zoomAt = (factor, point = { x: width / 2, y: canvasHeight / 2 }) => {
         autoFit = false;
-        const next = Math.max(.25, Math.min(3, transform.scale * factor));
+        const next = Math.max(fixedViewport ? .1 : .25, Math.min(3, transform.scale * factor));
         transform.x = point.x - (point.x - transform.x) * (next / transform.scale);
         transform.y = point.y - (point.y - transform.y) * (next / transform.scale);
         transform.scale = next;
         updateTransform();
     };
+    const fitScale = () => {
+        const values = [...positions.values()];
+        const spanX = Math.max(...values.map((item) => item.x)) - Math.min(...values.map((item) => item.x)) + 224;
+        const spanY = Math.max(...values.map((item) => item.y)) - Math.min(...values.map((item) => item.y)) + 136;
+        return Math.min(width / spanX, canvasHeight / spanY) * .92;
+    };
     const fit = () => {
         autoFit = true;
+        hint.textContent = "Drag tiles · drag background · wheel to zoom";
         const values = [...positions.values()];
         const minX = Math.min(...values.map((item) => item.x)) - 112;
         const maxX = Math.max(...values.map((item) => item.x)) + 112;
         const minY = Math.min(...values.map((item) => item.y)) - 68;
         const maxY = Math.max(...values.map((item) => item.y)) + 68;
-        const scale = Math.max(.25, Math.min(1.5, Math.min(width / (maxX - minX), height / (maxY - minY)) * .92));
+        const scale = Math.max(fixedViewport ? .1 : .25, Math.min(1.5, fitScale()));
         transform.scale = scale;
         transform.x = (width - (minX + maxX) * scale) / 2;
-        transform.y = (height - (minY + maxY) * scale) / 2;
+        transform.y = (canvasHeight - (minY + maxY) * scale) / 2;
         updateTransform();
+    };
+    // Large slices open legibly around the focus; Fit remains available to show every node.
+    const initialView = () => {
+        const roleFocus = nodes.find((node) => ["Changed focus", "Selected focus"].includes(node.impact_role))?.id;
+        const focus = fixedViewport && (positions.get(focusId) || positions.get(roleFocus));
+        if (!focus || fitScale() >= .6) { fit(); return; }
+        autoFit = true;
+        transform.scale = .75;
+        transform.x = width / 2 - focus.x * transform.scale;
+        transform.y = canvasHeight / 2 - focus.y * transform.scale;
+        updateTransform();
+        hint.textContent = `Centered on the focus · Fit shows all ${nodes.length} nodes`;
     };
 
     for (const edge of edges.filter((item) => nodeIds.has(item.source) && nodeIds.has(item.target))) {
@@ -353,21 +405,24 @@ export function renderGraph(container, nodes, edges, onSelect) {
     hint.textContent = "Drag tiles · drag background · wheel to zoom";
     controls.append(hint);
     container.append(root, controls);
-    fit();
+    initialView();
     graphResizers.set(root, () => {
         const measuredWidth = container.clientWidth;
         if (!measuredWidth || activeDrag || panStart) return;
         const nextWidth = Math.max(measuredWidth, 320);
-        if (nextWidth === width) return;
+        const nextCanvas = fixedViewport ? Math.max(container.clientHeight || 0, 360) : null;
+        if (nextWidth === width && (!fixedViewport || nextCanvas === canvasHeight)) return;
         width = nextWidth;
         height = graphHeight(nodes.length, width, nodes);
-        root.setAttribute("viewBox", `0 0 ${width} ${height}`);
+        canvasHeight = canvasHeightFor();
+        root.setAttribute("viewBox", `0 0 ${width} ${canvasHeight}`);
+        if (fixedViewport) root.style.height = `${canvasHeight}px`;
         for (const [id, point] of layout(nodes, width, height)) {
             Object.assign(positions.get(id), point);
             nodeGroups.get(id).setAttribute("transform", `translate(${point.x} ${point.y})`);
         }
         edgeRecords.forEach(updateEdge);
-        if (autoFit) fit();
+        if (autoFit) initialView();
     });
 }
 import { countLabel } from "./count-format.mjs";

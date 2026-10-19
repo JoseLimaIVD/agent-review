@@ -236,6 +236,21 @@ document.querySelector(".workspace-explore").addEventListener("toggle", (event) 
         renderWorkspaceShell();
     }
 });
+{
+    const explore = document.querySelector(".workspace-explore");
+    document.addEventListener("pointerdown", (event) => {
+        if (explore.open && !explore.contains(event.target)) explore.open = false;
+    }, true);
+    document.addEventListener("keydown", (event) => {
+        if (event.key !== "Escape" || !explore.open) return;
+        explore.open = false;
+        if (explore.contains(document.activeElement)) explore.querySelector("summary")?.focus();
+        event.stopPropagation();
+    }, true);
+    document.addEventListener("focusin", (event) => {
+        if (explore.open && !explore.contains(event.target)) explore.open = false;
+    });
+}
 for (const [button, mode] of [[elements.explore_priorities, "walkthrough"], [elements.explore_concerns, "findings"], [elements.explore_groups, "sections"], [elements.explore_architecture, "graph"],
     [elements.explore_paths, "decisions"], [elements.explore_packages, "packages"]]) {
     button.addEventListener("click", () => {
@@ -1594,7 +1609,9 @@ function renderImpact(model, focus = null) {
         evidence.append(ask);
         if (item.impact_role === "Related test") evidence.append(el("p", "muted", "Static test relationship. Execution of this affected behavior is not established by this graph."));
         elements.detail.append(evidence);
-    });
+    }, { viewport: true, focusId: options.seed,
+        emptyText: `No saved static relationships were found for ${model.nodes.find((node) => node.id === options.seed)?.name
+            || String(options.seed || "this item").replace(/^file:/, "")}. Non-code files and isolated changes have no impact graph.` });
     if (focus === "direction" || (focus === "expand" && expand.disabled)) direction.focus({ preventScroll: true });
     else if (focus === "expand") expand.focus({ preventScroll: true });
     else if (options.pendingFocus) {
