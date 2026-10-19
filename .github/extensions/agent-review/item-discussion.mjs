@@ -3,6 +3,37 @@ import { retrieveEvidence, splitLines } from "./review-pipeline.mjs";
 import { impactSlice } from "./web/impact-model.mjs";
 import { posix } from "node:path";
 
+// Measured current-side line execution from the supplied coverage run, bounded per answer.
+function lineRanges(lines, limit) {
+    const sorted = [...new Set(lines)].filter(Number.isInteger).sort((a, b) => a - b);
+    const ranges = [];
+    for (const line of sorted) {
+        const last = ranges.at(-1);
+        if (last && line === last[1] + 1) last[1] = line;
+        else ranges.push([line, line]);
+    }
+    const text = ranges.slice(0, limit).map(([start, end]) => start === end ? String(start) : `${start}-${end}`).join(", ");
+    return ranges.length > limit ? `${text}, … (${ranges.length - limit} more ranges)` : text;
+}
+
+function lineCoverage(model, candidates) {
+    if (!model.coverage?.available) return { status: "unavailable", note: "No line coverage was supplied for this review." };
+    const files = new Map((model.coverage.files || []).map((file) => [file.path, file]));
+    const paths = [...new Set(candidates.filter((path) => files.has(path)))].slice(0, 4);
+    if (!paths.length) return { status: "not_measured", note: "The supplied coverage run did not measure this item's files." };
+    return { status: "measured", side: "current",
+        note: "Lines executed in the supplied coverage run. This is aggregate execution, not proof that a named test covered the behavior.",
+        files: paths.map((path) => {
+            const file = files.get(path);
+            const changed = model.coverage.changed_lines?.[path];
+            return { path, executed_line_count: (file.covered_lines || []).length,
+                not_executed_lines: lineRanges(file.missing_lines || [], 80),
+                ...(changed ? { changed_lines: { executed: changed.covered, total: changed.total,
+                    executed_lines: lineRanges(changed.covered_lines || [], 80),
+                    not_executed: lineRanges(changed.uncovered_lines || [], 80) } } : {}) };
+        }) };
+}
+
 export function discussionContext(model, context, history, question) {
     const subject = context.subject || context.item;
     const ranges = [];
@@ -115,6 +146,8 @@ export function discussionContext(model, context, history, question) {
             note: "This is snapshot availability, not inspection coverage. Initial excerpts and catalogs are intentionally partial.",
         },
         test_evidence: context.test_evidence || { status: "unavailable", note: "No test execution evidence supplied." },
+        line_coverage: lineCoverage(model, [context.discussion_location?.path, subject?.path,
+            ...(context.section?.ranges || []).map((range) => range.path)]),
         ...(context.section ? { section: {
             title: context.section.title, grouping: context.section.grouping || "Source-linked changed contract and consumers",
             ranges: context.section.ranges.slice(0, 40).map(({ path, line, end_line, side }) => ({ path, line, end_line, side })),
@@ -142,6 +175,7 @@ export function discussionPrompt(context) {
         "CRITICAL SCOPE DISTINCTION: supplied evidence is only a subset of the saved snapshot. not_supplied gaps and omitted catalog entries mean NOT INCLUDED IN THIS ANSWER'S CONTEXT, not absent from the repository or snapshot. Use snapshot_availability for saved file counts. Never say only the sampled adapters/policies/tests are saved. Say 'I received excerpts from' or 'I have not inspected' and request additional saved ranges if needed.",
         "Return only JSON: {answer:string, citations:[{evidence_id,line}], requests:[{path,side:'base'|'current',start_line,end_line}], limitation:string}.",
         "Lead with the direct answer. Aim for 100–180 words unless the user asks for more detail; never exceed 4000 characters. Reference actual supplied evidence and request missing saved source ranges rather than guessing.",
+        "line_coverage holds measured current-side line execution when status is measured. Use it to answer coverage questions with exact line numbers; never claim coverage is unsupplied when it is measured, and never treat it as proof that a named test ran.",
         "Ranges use ABSOLUTE 1-based source line numbers, not offsets. start_line=201,end_line=400 is valid; start_line=201,end_line=200 is invalid. The 200-line limit is a WINDOW LENGTH, never a maximum absolute end_line. Larger ranges are split internally.",
         "If more context is needed, requests are fulfilled internally before answering. For a final answer include citations or explicitly explain why evidence is unavailable in limitation. Do not imply tests ran unless execution evidence was supplied.",
         JSON.stringify(context),

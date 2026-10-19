@@ -57,6 +57,7 @@ const state = {
     fileReviewDrafts: new Map(),
 };
 const elements = Object.fromEntries([
+    "source-coverage",
     "review-target-form", "review-mode", "review-ref", "review-target-label", "repository-identity", "review-list-refresh", "review-more", "review-options-status", "review-picker-notice", "clean-review", "change-brief",
     "review-overview", "review-background", "overview-title", "overview-description", "overview-progress", "overview-scope", "overview-start", "overview-files",
     "review-workflow", "workflow-overview", "workflow-review", "workflow-finish", "review-finish", "workspace-target", "workspace-find", "workspace-nav-toggle",
@@ -650,7 +651,7 @@ async function discussItem(item = state.selected) {
         elements.source_ruler.classList.add("hidden");
         elements.source_context_notice.classList.add("hidden");
         for (const panel of [elements.source_provenance, elements.source_annotation, elements.source_decisions, elements.source_risk,
-            elements.source_review_context, elements.source_origin, elements.file_review_form]) {
+            elements.source_review_context, elements.source_origin, elements.file_review_form, elements.source_coverage]) {
             panel.classList.add("hidden");
         }
         elements.source_panel.classList.remove("hidden");
@@ -3199,13 +3200,53 @@ function renderDetail(item) {
     }
 }
 
+const coverageLineCache = new WeakMap();
+
+// Current-side line coverage from the supplied run, keyed by repository path.
+function coverageLines(path) {
+    const model = state.payload?.model;
+    if (!path || !model?.coverage?.available) return null;
+    let byPath = coverageLineCache.get(model);
+    if (!byPath) {
+        byPath = new Map((model.coverage.files || []).map((file) => [file.path, new Map([
+            ...(file.covered_lines || []).map((line) => [line, "covered"]),
+            ...(file.missing_lines || []).map((line) => [line, "uncovered"]),
+        ])]));
+        coverageLineCache.set(model, byPath);
+    }
+    return byPath.get(path) || null;
+}
+
+function renderSourceCoverage() {
+    const panel = elements.source_coverage;
+    const path = state.source?.path;
+    const lines = coverageLines(path);
+    const changed = state.payload?.model?.coverage?.changed_lines?.[path];
+    if (!lines?.size || state.sourceTab === "base") { panel.classList.add("hidden"); return; }
+    panel.replaceChildren(
+        el("strong", "", "Line coverage"),
+        el("span", "coverage-key coverage-key-covered", "executed"),
+        el("span", "coverage-key coverage-key-uncovered", "not executed"),
+        el("span", "muted", changed?.total
+            ? `${changed.covered} of ${countLabel(changed.total, "changed executable line")} executed${changed.uncovered_lines?.length
+                ? ` · not executed: ${changed.uncovered_lines.slice(0, 12).join(", ")}${changed.uncovered_lines.length > 12 ? "…" : ""}` : ""} · supplied run, current side; not proof of named tests.`
+            : "Supplied run, current side; not proof of named tests."));
+    panel.classList.remove("hidden");
+}
+
 function codeRow(type, oldNumber, newNumber, prefix, content) {
     const row = el("div", `code-row diff-${type}`);
     if (oldNumber) row.dataset.oldLine = String(oldNumber);
     if (newNumber) row.dataset.newLine = String(newNumber);
+    const coverage = newNumber ? coverageLines(state.source?.path)?.get(Number(newNumber)) : null;
+    const current = el("span", "line-number", newNumber || "");
+    if (coverage) {
+        row.classList.add(`coverage-${coverage}`);
+        current.title = coverage === "covered" ? "Executed in the supplied coverage run" : "Not executed in the supplied coverage run";
+    }
     row.append(
         el("span", "line-number", oldNumber || ""),
-        el("span", "line-number", newNumber || ""),
+        current,
         el("span", "diff-prefix", prefix),
         el("code", "", content),
     );
@@ -3594,6 +3635,7 @@ async function renderSource({ preserveScroll = false } = {}) {
     if (annotation && selectedPath === state.source.path) renderAnnotation(state.selected, annotation);
     else if (!renderSectionEvidence()) elements.source_annotation.classList.add("hidden");
     renderSourceRisk();
+    renderSourceCoverage();
     renderSourceDecisions();
     renderProvenance();
     document.querySelectorAll(".tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.tab === state.sourceTab));

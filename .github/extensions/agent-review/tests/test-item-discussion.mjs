@@ -179,7 +179,19 @@ test("questions carry validated viewed ranges without changing their pinned item
     await assert.rejects(state.askDiscussion({ id: "file:a.js", question: "Nope",
         location: { path: "../outside.js", line: 1, side: "current" } }), /saved source range/);
 });
-test("blank schema placeholder requests never fail a grounded answer", () => {
+test("discussion receives measured line coverage as compact ranges instead of guessing", () => {
+    const covered = { ...model, coverage: { available: true,
+        changed_lines: { "a.js": { covered: 4, total: 6, uncovered_lines: [6, 7], covered_lines: [2, 3, 4, 5] } },
+        files: [{ path: "a.js", covered_lines: [1, 2, 3, 4, 5, 8, 9], missing_lines: [6, 7, 12], executable_lines: [] }] } };
+    const input = discussionContext(covered, { item: { id: "file:a.js", path: "a.js" } }, [], "Which changed lines are uncovered?");
+    assert.equal(input.line_coverage.status, "measured");
+    assert.deepEqual(input.line_coverage.files[0], { path: "a.js", executed_line_count: 7, not_executed_lines: "6-7, 12",
+        changed_lines: { executed: 4, total: 6, executed_lines: "2-5", not_executed: "6-7" } });
+    assert.match(discussionPrompt(input), /never claim coverage is unsupplied when it is measured/);
+    assert.equal(discussionContext(model, context, [], "Coverage?").line_coverage.status, "unavailable");
+    assert.equal(discussionContext({ ...covered, coverage: { available: true, files: [] } }, context, [], "Coverage?").line_coverage.status, "not_measured");
+});
+test("blank schema placeholder requests never fail a grounded answer", () => {
     const input = discussionContext(model, context, [], "Explain.");
     const result = validateDiscussionResponse({ answer: "The saved value is one.", limitation: "",
         citations: [{ evidence_id: input.evidence[0].id, line: 1 }],

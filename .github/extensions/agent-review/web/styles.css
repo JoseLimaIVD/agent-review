@@ -2048,6 +2048,14 @@ body.reviewing .graph-controls { min-width: 0; max-width: 100%; flex: 1 1 280px;
 body.reviewing .graph-controls > * { max-width: 100%; }
 body.reviewing .graph-controls input[type="search"] { min-width: 80px; flex: 1; }
 body.reviewing #graph { flex: 1; min-height: 0; overflow: auto; }
+.source-coverage { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 0; padding: 6px 12px; border-bottom: 1px solid var(--cp-border); font-size: 12px; }
+.source-coverage.hidden { display: none; }
+.coverage-key { display: inline-flex; align-items: center; gap: 6px; color: var(--cp-text); }
+.coverage-key::before { content: ""; width: 4px; height: 14px; border-radius: 2px; }
+.coverage-key-covered::before { background: var(--cp-success); }
+.coverage-key-uncovered::before { background: var(--cp-danger); }
+.code-row.coverage-covered > .line-number:nth-child(2) { box-shadow: inset -3px 0 0 var(--cp-success); }
+.code-row.coverage-uncovered > .line-number:nth-child(2) { box-shadow: inset -3px 0 0 var(--cp-danger); }
 body.reviewing .workspace.impact-mode #graph { display: flex; flex-direction: column; overflow: auto; }
 body.reviewing .workspace.impact-mode .impact-toolbar { flex: 0 0 auto; }
 body.reviewing .workspace.impact-mode .impact-graph { flex: 1 1 auto; min-height: 360px; overflow: hidden; }

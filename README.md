@@ -69,7 +69,9 @@ the change navigator in a keyboard-accessible drawer.
 Context foregrounds the change mechanism, source-backed potential consumers,
 actual verification and open evidence gaps. Static test associations, named-test
 execution and aggregate coverage remain distinct; repository test outcomes alone
-never prove a particular path ran. **Ask about this** is available beside the
+never prove a particular path ran. When a supplied coverage run measured the
+open file, the current-side gutter marks each executed and not-executed line and
+item discussion receives those exact line ranges. **Ask about this** is available beside the
 reading-pane controls, and the context/discussion switch stays visible while
 reading. Optional originating-session context is disclosed separately; errors
 remain explicit. **Focus code** also hides the decision footer while reading.
