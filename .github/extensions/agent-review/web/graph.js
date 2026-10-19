@@ -12,6 +12,97 @@ function displayName(node) {
     return node.display_name || node.name || node.qualified_name || node.id;
 }
 
+// Impact tiles show the last two qualified segments; namespaces made .NET tests truncate to identical text.
+function tileName(node) {
+    const name = displayName(node);
+    if (!node.impact_role) return name;
+    const paren = name.indexOf("(");
+    const head = paren >= 0 ? name.slice(0, paren) : name;
+    const parts = head.split(".");
+    return parts.length > 2 ? `${parts.slice(-2).join(".")}${paren >= 0 ? name.slice(paren) : ""}` : name;
+}
+
+const isImpactFocus = (node) => ["Changed focus", "Selected focus"].includes(node.impact_role);
+// Normalised ring spacing keeps 192×104 tiles apart at every angle on an ellipse 1.8× wider than tall.
+const RING_SPACING = 165;
+const RING_ASPECT = 1.8;
+
+// Blast-radius layout: focus at the centre, each hop on an outer ring, dependencies left and consumers/tests right,
+// so every direct relationship is an unobstructed spoke instead of passing under intermediate tiles.
+function radialImpactPositions(nodes, edges) {
+    const ids = new Set(nodes.map((node) => node.id));
+    const adjacent = new Map(nodes.map((node) => [node.id, new Set()]));
+    for (const edge of edges) {
+        if (edge.source === edge.target || !ids.has(edge.source) || !ids.has(edge.target)) continue;
+        adjacent.get(edge.source).add(edge.target);
+        adjacent.get(edge.target).add(edge.source);
+    }
+    const hop = new Map();
+    const queue = nodes.filter(isImpactFocus).map((node) => node.id);
+    if (!queue.length && nodes.length) queue.push(nodes[0].id);
+    queue.forEach((id) => hop.set(id, 0));
+    for (let index = 0; index < queue.length; index++) {
+        for (const next of adjacent.get(queue[index])) {
+            if (!hop.has(next)) { hop.set(next, hop.get(queue[index]) + 1); queue.push(next); }
+        }
+    }
+    const outer = Math.max(0, ...hop.values()) + 1;
+    for (const node of nodes) if (!hop.has(node.id)) hop.set(node.id, outer);
+    const rings = [];
+    for (const node of nodes) (rings[hop.get(node.id)] ||= []).push(node);
+    const angle = new Map();
+    const positions = new Map();
+    const place = (node, radius, theta) => {
+        angle.set(node.id, theta);
+        positions.set(node.id, { x: Math.cos(theta) * radius * RING_ASPECT, y: Math.sin(theta) * radius });
+    };
+    const centre = rings[0] || [];
+    const centreRadius = centre.length > 1 ? Math.max(90, RING_SPACING * centre.length / (2 * Math.PI)) : 0;
+    centre.forEach((node, index) => place(node, centreRadius, -Math.PI / 2 + 2 * Math.PI * index / Math.max(1, centre.length)));
+    let radius = centreRadius;
+    for (let ring = 1; ring < rings.length; ring++) {
+        const members = rings[ring] || [];
+        if (!members.length) continue;
+        radius = Math.max(radius + (ring === 1 && !centreRadius ? 160 : 150), RING_SPACING * members.length / (2 * Math.PI));
+        const parentAngle = (node) => {
+            const parents = [...adjacent.get(node.id)].filter((id) => hop.get(id) < ring && angle.has(id)).map((id) => angle.get(id));
+            return parents.length ? Math.atan2(parents.reduce((sum, value) => sum + Math.sin(value), 0),
+                parents.reduce((sum, value) => sum + Math.cos(value), 0)) : 0;
+        };
+        const left = members.filter((node) => node.impact_role === "Dependency");
+        const right = members.filter((node) => node.impact_role !== "Dependency");
+        const order = (group) => group.map((node) => ({ node, parent: parentAngle(node) }))
+            .sort((a, b) => a.parent - b.parent || (a.node.impact_role || "").localeCompare(b.node.impact_role || ""));
+        const spread = (group, centreAngle, arc) => order(group).forEach(({ node }, index) =>
+            place(node, radius, centreAngle - arc / 2 + arc * (index + .5) / group.length));
+        if (ring === 1 && left.length && right.length) {
+            const leftArc = 2 * Math.PI * left.length / members.length;
+            spread(left, Math.PI, leftArc);
+            spread(right, 0, 2 * Math.PI - leftArc);
+        } else if (ring === 1) spread(members, !right.length ? Math.PI : 0, 2 * Math.PI);
+        else {
+            // Outer hops sit beside their parents, pushed apart only as far as tiles need.
+            const ordered = order(members);
+            const gap = Math.min(2 * Math.PI / members.length, RING_SPACING / radius);
+            const thetas = ordered.map(({ parent }) => parent);
+            for (let index = 1; index < thetas.length; index++) thetas[index] = Math.max(thetas[index], thetas[index - 1] + gap);
+            const shift = thetas.reduce((sum, theta, index) => sum + theta - ordered[index].parent, 0) / thetas.length;
+            if (thetas.at(-1) - thetas[0] > 2 * Math.PI - gap) spread(members, 0, 2 * Math.PI);
+            else ordered.forEach(({ node }, index) => place(node, radius, thetas[index] - shift));
+        }
+    }
+    return positions;
+}
+
+function impactRadialFrame(nodes, edges, width) {
+    const relative = radialImpactPositions(nodes, edges);
+    const ys = [...relative.values()].map((point) => point.y);
+    const height = Math.max(440, Math.max(...ys) - Math.min(...ys) + 200);
+    const offsetY = height / 2 - (Math.max(...ys) + Math.min(...ys)) / 2;
+    return { height, positions: new Map([...relative].map(([id, point]) => [id, savedPositions.get(`impact:${id}`)
+        || { x: width / 2 + point.x, y: point.y + offsetY }])) };
+}
+
 function wrapLabel(value, max = 24) {
     if (value.length <= max) return [value];
     const splitAt = value.lastIndexOf(".", max);
@@ -23,64 +114,27 @@ function wrapLabel(value, max = 24) {
 
 const NODE_CELL_WIDTH = 216;
 const NODE_CELL_HEIGHT = 184;
-const IMPACT_ASPECT = 1.7;
-
-function impactLanes(nodes) {
-    return [nodes.filter((node) => node.impact_role === "Dependency"),
-        nodes.filter((node) => ["Changed focus", "Selected focus"].includes(node.impact_role)),
-        nodes.filter((node) => !["Dependency", "Changed focus", "Selected focus"].includes(node.impact_role))];
-}
-
-// Wrap long impact lanes into extra columns so the whole slice approximates a wide pane instead of one tall column.
-function impactRows(nodes) {
-    const sizes = impactLanes(nodes).map((lane) => lane.length).filter(Boolean);
-    let best = Math.max(1, ...sizes);
-    let bestScore = Infinity;
-    for (let rows = 1; rows <= Math.max(1, ...sizes); rows++) {
-        const columns = sizes.reduce((sum, size) => sum + Math.ceil(size / rows), 0);
-        const score = Math.abs(Math.log((columns * NODE_CELL_WIDTH) / (rows * NODE_CELL_HEIGHT) / IMPACT_ASPECT));
-        if (score < bestScore) { best = rows; bestScore = score; }
-    }
-    return best;
-}
-
-function graphHeight(nodeCount, width, nodes = []) {
+function graphHeight(nodeCount, width, nodes = [], edges = []) {
     if (nodes.some((node) => node.impact_role)) {
         if (width < 650) return Math.max(440, nodeCount * NODE_CELL_HEIGHT);
-        return Math.max(440, impactRows(nodes) * NODE_CELL_HEIGHT);
+        return impactRadialFrame(nodes, edges, width).height;
     }
     const columns = Math.max(1, Math.floor(width / NODE_CELL_WIDTH));
     return Math.max(440, Math.ceil(nodeCount / columns) * NODE_CELL_HEIGHT);
 }
 
-function layout(nodes, width, height) {
+function layout(nodes, width, height, edges = []) {
     if (nodes.some((node) => node.impact_role)) {
-        const groups = impactLanes(nodes);
-        if (width < 650) {
-            let offset = 0;
-            return new Map(groups.flatMap((group) => {
-                const points = group.map((node, index) => [node.id, savedPositions.get(`impact:${node.id}`) || {
-                    x: width / 2, y: (offset + index) * NODE_CELL_HEIGHT + NODE_CELL_HEIGHT / 2,
-                }]);
-                offset += group.length;
-                return points;
-            }));
-        }
-        const rows = impactRows(nodes);
-        const laneColumns = groups.map((group) => group.length ? Math.ceil(group.length / rows) : 0);
-        const totalColumns = Math.max(1, laneColumns.reduce((sum, value) => sum + value, 0));
-        const cellWidth = Math.max(NODE_CELL_WIDTH, width / totalColumns);
-        let column = 0;
-        return new Map(groups.flatMap((group, lane) => {
-            const start = column;
-            column += laneColumns[lane];
-            return group.map((node, index) => {
-                const wrapped = group.length > rows;
-                const row = wrapped ? index % rows : index;
-                const x = (start + (wrapped ? Math.floor(index / rows) : 0) + .5) * cellWidth;
-                const y = wrapped ? (row + .5) * height / rows : height * (index + 1) / (group.length + 1);
-                return [node.id, savedPositions.get(`impact:${node.id}`) || { x, y }];
-            });
+        if (width >= 650) return impactRadialFrame(nodes, edges, width).positions;
+        const groups = [nodes.filter((node) => node.impact_role === "Dependency"), nodes.filter(isImpactFocus),
+            nodes.filter((node) => node.impact_role !== "Dependency" && !isImpactFocus(node))];
+        let offset = 0;
+        return new Map(groups.flatMap((group) => {
+            const points = group.map((node, index) => [node.id, savedPositions.get(`impact:${node.id}`) || {
+                x: width / 2, y: (offset + index) * NODE_CELL_HEIGHT + NODE_CELL_HEIGHT / 2,
+            }]);
+            offset += group.length;
+            return points;
         }));
     }
     const columns = Math.min(nodes.length, Math.max(1, Math.floor(width / NODE_CELL_WIDTH)));
@@ -140,7 +194,8 @@ export function renderGraph(container, nodes, edges, onSelect, { viewport: fixed
         return;
     }
     let width = Math.max(container.clientWidth || 320, 320);
-    let height = graphHeight(nodes.length, width, nodes);
+    let height = graphHeight(nodes.length, width, nodes, edges);
+    const radial = () => width >= 650 && nodes.some((node) => node.impact_role);
     // A fixed viewport keeps large impact slices pannable/zoomable instead of growing a page-tall canvas.
     const canvasHeightFor = () => fixedViewport ? Math.max(container.clientHeight || 0, 360) : height;
     let canvasHeight = canvasHeightFor();
@@ -156,18 +211,31 @@ export function renderGraph(container, nodes, edges, onSelect, { viewport: fixed
     root.append(defs);
     const viewport = svg("g", { class: "graph-viewport" });
     root.append(viewport);
-    const positions = layout(nodes, width, height);
+    const edgeLayer = svg("g", { class: "edge-layer" });
+    const nodeLayer = svg("g", { class: "node-layer" });
+    // Edges that would pass under another tile are drawn above the tiles so they never look like a connection.
+    const overLayer = svg("g", { class: "edge-over-layer" });
+    viewport.append(edgeLayer, nodeLayer, overLayer);
+    const positions = layout(nodes, width, height, edges);
     const nodeGroups = new Map();
     const nodeIds = new Set(nodes.map((node) => node.id));
     const edgeRecords = [];
+    let selectedId = null;
     const highlightEdges = (nodeId) => {
-        root.classList.toggle("focus-edges", nodeId !== null);
+        const active = nodeId ?? selectedId;
+        root.classList.toggle("focus-edges", active !== null);
         for (const record of edgeRecords) {
             record.path.classList.toggle(
                 "edge-active",
-                nodeId !== null && (record.edge.source === nodeId || record.edge.target === nodeId),
+                active !== null && (record.edge.source === active || record.edge.target === active),
             );
         }
+    };
+    const select = (node) => {
+        selectedId = node.id;
+        for (const [id, group] of nodeGroups) group.classList.toggle("node-selected", id === node.id);
+        highlightEdges(null);
+        onSelect(node);
     };
     if (nodes.length > 24) root.classList.add("graph-dense");
     const transform = { x: 0, y: 0, scale: 1 };
@@ -188,6 +256,7 @@ export function renderGraph(container, nodes, edges, onSelect, { viewport: fixed
         record.path.setAttribute(
             "d",
             !dx && !dy ? `M ${source.x + 96} ${source.y - 20} C ${source.x + 170} ${source.y - 100}, ${source.x + 170} ${source.y + 100}, ${source.x + 96} ${source.y + 20}`
+                : radial() ? `M ${start.x} ${start.y} L ${end.x} ${end.y}`
                 : !dx ? `M ${source.x + 100} ${source.y} C ${source.x + 150} ${source.y}, ${target.x + 150} ${target.y}, ${target.x + 100} ${target.y}`
                 : horizontal ? `M ${start.x} ${start.y} C ${(start.x + end.x) / 2} ${start.y}, ${(start.x + end.x) / 2} ${end.y}, ${end.x} ${end.y}`
                     : `M ${start.x} ${start.y} C ${start.x} ${(start.y + end.y) / 2}, ${end.x} ${(start.y + end.y) / 2}, ${end.x} ${end.y}`,
@@ -196,6 +265,17 @@ export function renderGraph(container, nodes, edges, onSelect, { viewport: fixed
             record.label.setAttribute("x", String((source.x + target.x) / 2));
             record.label.setAttribute("y", String((source.y + target.y) / 2 - 6));
         }
+        const crosses = radial() && (dx || dy) && [...positions].some(([id, point]) => {
+            if (id === record.edge.source || id === record.edge.target) return false;
+            for (let step = 1; step < 24; step++) {
+                const x = start.x + (end.x - start.x) * step / 24, y = start.y + (end.y - start.y) * step / 24;
+                if (Math.abs(x - point.x) < 96 && Math.abs(y - point.y) < 52) return true;
+            }
+            return false;
+        });
+        record.path.classList.toggle("edge-over", Boolean(crosses));
+        const layer = crosses ? overLayer : edgeLayer;
+        if (record.path.parentNode !== layer) layer.append(record.path);
     };
     const pointForEvent = (event) => {
         const point = root.createSVGPoint();
@@ -259,12 +339,12 @@ export function renderGraph(container, nodes, edges, onSelect, { viewport: fixed
             onSelect(edge);
         });
         path.addEventListener("keydown", (event) => event.key === "Enter" && onSelect(edge));
-        viewport.append(path);
+        edgeLayer.append(path);
         let label = null;
         if ((edge.count || 1) > 1) {
             label = svg("text", { class: "edge-label" });
             label.textContent = String(edge.count);
-            viewport.append(label);
+            edgeLayer.append(label);
         }
         const record = { edge, path, label };
         edgeRecords.push(record);
@@ -287,7 +367,7 @@ export function renderGraph(container, nodes, edges, onSelect, { viewport: fixed
         group.append(title, svg("rect", { x: -96, y: -52, width: 192, height: 104, rx: 6 }));
         const kind = svg("text", { x: -80, y: -28, class: "node-kind" });
         kind.textContent = (node.kind || "item").toUpperCase();
-        wrapLabel(displayName(node)).forEach((text, index) => {
+        wrapLabel(tileName(node)).forEach((text, index) => {
             const name = svg("text", { x: -80, y: -5 + index * 16, class: "node-name" });
             name.textContent = text;
             group.append(name);
@@ -326,8 +406,8 @@ export function renderGraph(container, nodes, edges, onSelect, { viewport: fixed
         group.addEventListener("pointerleave", () => highlightEdges(null));
         group.addEventListener("focus", () => highlightEdges(node.id));
         group.addEventListener("blur", () => highlightEdges(null));
-        group.addEventListener("keydown", (event) => event.key === "Enter" && onSelect(node));
-        viewport.append(group);
+        group.addEventListener("keydown", (event) => event.key === "Enter" && select(node));
+        nodeLayer.append(group);
         nodeGroups.set(node.id, group);
     }
 
@@ -374,7 +454,7 @@ export function renderGraph(container, nodes, edges, onSelect, { viewport: fixed
             activeDrag = null;
             root.releasePointerCapture(event.pointerId);
             resizeGraph(container);
-            if (!moved) onSelect(completedDrag.node);
+            if (!moved) select(completedDrag.node);
             return;
         }
         panStart = null;
@@ -413,11 +493,11 @@ export function renderGraph(container, nodes, edges, onSelect, { viewport: fixed
         const nextCanvas = fixedViewport ? Math.max(container.clientHeight || 0, 360) : null;
         if (nextWidth === width && (!fixedViewport || nextCanvas === canvasHeight)) return;
         width = nextWidth;
-        height = graphHeight(nodes.length, width, nodes);
+        height = graphHeight(nodes.length, width, nodes, edges);
         canvasHeight = canvasHeightFor();
         root.setAttribute("viewBox", `0 0 ${width} ${canvasHeight}`);
         if (fixedViewport) root.style.height = `${canvasHeight}px`;
-        for (const [id, point] of layout(nodes, width, height)) {
+        for (const [id, point] of layout(nodes, width, height, edges)) {
             Object.assign(positions.get(id), point);
             nodeGroups.get(id).setAttribute("transform", `translate(${point.x} ${point.y})`);
         }
