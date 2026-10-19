@@ -95,7 +95,9 @@ export function fileReviewProgress(model, entries) {
 }
 
 export function nextFileReview(files, entries, current = null) {
-    const index = files.findIndex((file) => file.path === current);
+    const target = typeof current === "string" ? { path: current, group: null } : current;
+    let index = target ? files.findIndex((file) => file.path === target.path && file.group === target.group) : -1;
+    if (index < 0 && target) index = files.findIndex((file) => file.path === target.path);
     const ordered = index >= 0 ? [...files.slice(index + 1), ...files.slice(0, index + 1)] : files;
     return ordered.find((file) => (entries.get(fileReviewId(file.path))?.disposition || "pending") === "pending")
         || ordered.find((file) => entries.get(fileReviewId(file.path))?.disposition === "follow-up") || null;

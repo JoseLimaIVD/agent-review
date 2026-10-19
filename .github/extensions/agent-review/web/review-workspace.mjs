@@ -43,3 +43,13 @@ export function fileTree(files) {
     }
     return root;
 }
+
+export function treeOrder(tree) {
+    return [...[...tree.directories.values()].sort((a, b) => a.name.localeCompare(b.name)).flatMap(treeOrder), ...tree.files];
+}
+
+// The order a reviewer sees in the rail: groups top to bottom, each group's folder tree as rendered.
+export function reviewSequence(navigation, mode = "groups") {
+    if (mode === "files") return treeOrder(fileTree(navigation.files)).map((file) => ({ path: file.path, group: null, file }));
+    return navigation.groups.flatMap((group) => treeOrder(fileTree(group.files)).map((file) => ({ path: file.path, group: group.id, file })));
+}

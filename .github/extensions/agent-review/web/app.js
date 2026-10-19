@@ -12,7 +12,7 @@ import { isReviewSymbol, isTestPath, languageForPath } from "/languages.mjs";
 import { ConnectionFeedback } from "/connection-feedback.mjs";
 import { describeAnalysisWarning } from "/analysis-limitations.mjs";
 import { buildReviewPlan } from "/review-plan.mjs";
-import { fileTree, groupForSource, workspaceNavigation } from "/review-workspace.mjs";
+import { fileTree, groupForSource, reviewSequence, workspaceNavigation } from "/review-workspace.mjs";
 import { countLabel, plural } from "/count-format.mjs";
 import {
     REVIEW_DISPOSITIONS, fileReviewId, fileReviewProgress, isReviewComplete, nextFileReview, nextReviewItem, parseReviewLedger, reviewProgress,
@@ -1173,18 +1173,32 @@ elements.review_progress_backup.addEventListener("click", () => {
 });
 
 function fileReviewQueue() {
-    const navigation = workspaceNavigation(state.payload?.model, state.sectionData);
-    const files = [...new Map(navigation.groups.flatMap((group) => group.files).map((file) => [file.path, file])).values()];
-    const priorities = new Map(overviewPlan().map((item) => [item.path, item.score]));
-    return files.sort((a, b) => (priorities.get(b.path) || 0) - (priorities.get(a.path) || 0));
+    return reviewSequence(workspaceNavigation(state.payload?.model, state.sectionData), state.navigationMode);
 }
 
-async function openFileReview(file) {
-    if (!file) { openFinishReview(); return; }
-    const priority = overviewPlan().find((item) => item.path === file.path);
-    if (priority) { openReviewPlanItem(priority); return; }
+// Review groups load asynchronously; choosing a file before they arrive would treat every file as supporting.
+async function readySectionData() {
+    if (ensureSectionData()) return;
+    await state.sectionPromise;
+}
+
+async function nextFileFromRail(current = null) {
+    await readySectionData();
+    return nextFileReview(fileReviewQueue(), state.reviewLedger, current);
+}
+
+function uniqueReviewFiles() {
+    return [...new Map(fileReviewQueue().map((entry) => [entry.path, entry])).values()];
+}
+
+async function openFileReview(entry) {
+    if (!entry) { openFinishReview(); return; }
     const navigation = workspaceNavigation(state.payload.model, state.sectionData);
-    await openWorkspaceFile(file, navigation.groups.find((group) => group.files.some((item) => item.path === file.path)));
+    const group = navigation.groups.find((item) => item.id === entry.group)
+        || navigation.groups.find((item) => item.files.some((file) => file.path === entry.path));
+    const priority = !group?.section && overviewPlan().find((item) => item.path === entry.path);
+    if (priority) { openReviewPlanItem(priority); return; }
+    await openWorkspaceFile(entry.file || entry, group);
 }
 
 async function resumeReviewCursor(cursor) {
@@ -1256,7 +1270,8 @@ async function saveCurrentFile(advance) {
     elements.file_review_form.dataset.key = "";
     renderFileReview();
     if (advance) {
-        const next = nextFileReview(fileReviewQueue(), state.reviewLedger, path);
+        const next = await nextFileFromRail(
+            { path, group: state.navigationMode === "files" ? null : state.activeReviewGroup || null });
         if (!next || (next.path === path && disposition !== "pending")) openFinishReview();
         else await openFileReview(next);
     }
@@ -1311,7 +1326,7 @@ function renderFinishReview() {
     if (next) {
         const button = el("button", "review-next", "Continue remaining review");
         button.type = "button";
-        button.addEventListener("click", () => openFileReview(next).catch(showError));
+        button.addEventListener("click", () => nextFileFromRail().then(openFileReview).catch(showError));
         panel.append(button);
     }
     const legacy = [...state.reviewLedger].filter(([id]) => !id.startsWith("review-file:"));
@@ -1323,7 +1338,7 @@ function renderFinishReview() {
         ? `Linked-test run completed: ${tests.counts?.passed || 0} passed, ${tests.counts?.failed || 0} failed. This is separate from human review.`
         : "No completed linked-test run is recorded for this view. Coverage and AI analysis retain their own evidence limits."));
     const list = el("div", "finish-files");
-    for (const file of fileReviewQueue()) {
+    for (const file of uniqueReviewFiles()) {
         const record = state.reviewLedger.get(fileReviewId(file.path));
         const button = el("button", "workspace-file", `${record?.disposition || "pending"} · ${file.path}${record?.note ? ` — ${record.note}` : ""}`);
         button.type = "button";
@@ -1685,7 +1700,7 @@ function ensureSectionData() {
     if (state.sectionDataKey !== key) {
         if (state.sectionLoadingKey !== key && state.sectionError?.key !== key) {
             state.sectionLoadingKey = key;
-            api("/api/review-sections").then((data) => {
+            state.sectionPromise = api("/api/review-sections").then((data) => {
                 if (state.sectionLoadingKey !== key) return;
                 state.sectionData = data;
                 state.sectionDataKey = key;
@@ -2175,7 +2190,7 @@ elements.overview_start.addEventListener("click", () => {
     const changed = saved && state.payload.model.changes.some((file) => file.path === saved.path && file.status !== "unchanged");
     if (changed && (state.reviewLedger.get(fileReviewId(saved.path))?.disposition || "pending") === "pending") {
         resumeReviewCursor(saved).catch(showError);
-    } else openFileReview(nextFileReview(fileReviewQueue(), state.reviewLedger)).catch(showError);
+    } else nextFileFromRail().then(openFileReview).catch(showError);
 });
 elements.overview_files.addEventListener("click", browseReviewFiles);
 
