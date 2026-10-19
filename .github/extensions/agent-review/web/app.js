@@ -497,9 +497,11 @@ function renderReviewCommands() {
     if (!model) return;
     if (!commandCatalogs.has(model)) commandCatalogs.set(model, reviewCommands(model));
     const query = elements.review_command_query.value.trim().toLowerCase();
+    const prefix = (item) => Number(item.title.toLowerCase().startsWith(query));
+    // Typed searches still keep the change set ahead of unchanged repository symbols.
     const matches = commandCatalogs.get(model).filter((item) => query
         ? `${item.title} ${item.path || ""} ${item.reason || ""}`.toLowerCase().includes(query) : item.rank < 3)
-        .sort((a, b) => Number(b.title.toLowerCase().startsWith(query)) - Number(a.title.toLowerCase().startsWith(query))
+        .sort((a, b) => Number(a.rank >= 3) - Number(b.rank >= 3) || prefix(b) - prefix(a)
             || a.rank - b.rank || a.title.localeCompare(b.title));
     elements.review_command_count.textContent = query
         ? `Showing ${Math.min(30, matches.length)} of ${matches.length.toLocaleString()} matching review items · Enter opens the first`
