@@ -6,6 +6,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { ReviewState } from "../../review-state.mjs";
+import { ExplanationValidationError } from "../../ai-response.mjs";
 import { startReviewServer } from "../../server.mjs";
 
 const results = process.env.AGENT_REVIEW_LARGE_RESULTS;
@@ -16,6 +17,7 @@ const workspace = await mkdtemp(join(tmpdir(), "discussion-browser-"));
 let browser, server, state;
 try {
     let calls = 0;
+    let failNextValidation = false;
     state = new ReviewState(model.metadata.repo_root, { workspacePath: workspace,
         generateAnnotation: async () => "## Summary\n\nSaved source.\n\n## Review order\n\nInspect the selected item.\n\n## Gaps\n\nExecution not established.",
         generateDiscussion: async (input, { signal }) => {
@@ -23,6 +25,10 @@ try {
             if (calls === 1) return new Promise((_resolve, reject) => {
                 signal.addEventListener("abort", () => reject(signal.reason), { once: true });
             });
+            if (input.question === "Force a validation failure." && failNextValidation) {
+                failNextValidation = false;
+                throw new ExplanationValidationError('Copilot did not return a valid explanation: Invalid saved range {"end_line":0,"path":""}');
+            }
             const item = input.evidence[0];
             return { answer: "This deterministic fault-path check uses saved source evidence.",
                 limitation: "No tests were executed.", citations: [{ evidence_id: item.id, line: item.lines[0].line }], requests: [] };
@@ -80,6 +86,21 @@ try {
         await ask.click();
         await pane.getByText("Answer complete. This thread remains pinned to its saved snapshot.").waitFor();
         assert.ok(await pane.locator(".discussion-user").count());
+        failNextValidation = true;
+        await input.fill("Force a validation failure.");
+        await pane.getByRole("button", { name: "Send", exact: true }).click();
+        const retry = pane.getByRole("button", { name: "Retry question", exact: true });
+        await retry.waitFor();
+        await pane.getByText(/Could not complete: Copilot could not produce a source-grounded answer/).last().waitFor();
+        assert.equal(await input.inputValue(), "Force a validation failure.", "the failed question is restored for retry");
+        assert.equal(await pane.getByText(/Invalid saved range/).last().isVisible(), false, "schema detail stays collapsed");
+        if (process.env.AGENT_REVIEW_SCREENSHOT_DIR) {
+            await page.screenshot({ path: join(process.env.AGENT_REVIEW_SCREENSHOT_DIR, `discussion-retry-${theme}.png`) });
+        }
+        await retry.click();
+        await pane.getByText("Answer complete. This thread remains pinned to its saved snapshot.").waitFor();
+        assert.equal(await retry.isVisible(), false);
+        assert.equal(await input.inputValue(), "");
         await page.route("**/api/discussion", async (route) => {
             if (route.request().method() !== "POST") return route.continue();
             await route.fulfill({ status: 503, contentType: "application/json", body: '{"error":"Deliberate provider failure"}' });

@@ -179,6 +179,43 @@ test("questions carry validated viewed ranges without changing their pinned item
     await assert.rejects(state.askDiscussion({ id: "file:a.js", question: "Nope",
         location: { path: "../outside.js", line: 1, side: "current" } }), /saved source range/);
 });
+test("blank schema placeholder requests never fail a grounded answer", () => {
+    const input = discussionContext(model, context, [], "Explain.");
+    const result = validateDiscussionResponse({ answer: "The saved value is one.", limitation: "",
+        citations: [{ evidence_id: input.evidence[0].id, line: 1 }],
+        requests: [{ path: "", side: "current", start_line: 0, end_line: 0 }] }, input);
+    assert.deepEqual(result.requests, []);
+    assert.equal(result.limitation, "");
+    assert.ok(buildDiscussionVerificationPrompt(input, { answer: "The saved value is one.", limitation: "",
+        citations: [{ evidence_id: input.evidence[0].id, line: 1 }],
+        requests: [{ path: "", side: "base", start_line: 0, end_line: 0 }] }), "final answers still receive verification");
+});
+test("a usable answer keeps its content when a stray follow-up range is malformed", () => {
+    const input = discussionContext(model, context, [], "Explain.");
+    const result = validateDiscussionResponse({ answer: "The saved value is one.", limitation: "",
+        citations: [{ evidence_id: input.evidence[0].id, line: 1 }],
+        requests: [{ path: "/etc/passwd", side: "current", start_line: 5, end_line: 1 }] }, input);
+    assert.equal(result.content, "The saved value is one.");
+    assert.deepEqual(result.requests, []);
+    assert.match(result.limitation, /1 malformed source request was ignored/);
+    assert.throws(() => validateDiscussionResponse({ answer: "", limitation: "", citations: [],
+        requests: [{ path: "", side: "current", start_line: 3, end_line: 1 }] }, input), /Invalid saved range/);
+});
+test("failed generation shows plain-language guidance and keeps the technical detail separate", async () => {
+    const { ExplanationValidationError } = await import("../ai-response.mjs");
+    const state = new ReviewState("C:\\repo", { generateDiscussion: async () => {
+        throw new ExplanationValidationError('Invalid saved range {"end_line":0,"path":""}');
+    } });
+    state.model = { ...model, metadata: {}, changes: [{ path: "a.js", status: "modified" }] };
+    const thread = await state.askDiscussion({ id: "file:a.js", question: "Explain." });
+    await state.discussionRuns.get(thread.id);
+    const failed = thread.messages.at(-1);
+    assert.equal(failed.status, "error");
+    assert.doesNotMatch(failed.error, /saved range|end_line|\{/);
+    assert.match(failed.error, /Retry/);
+    assert.match(failed.error_detail, /Invalid saved range/);
+    assert.equal(thread.messages.at(-2).content, "Explain.");
+});
 
 test("an item accepts only one active generation, and stop preserves an explicit stopped answer", async () => {
     const state = new ReviewState("C:\\repo", { generateDiscussion: async () => new Promise(() => {}) });

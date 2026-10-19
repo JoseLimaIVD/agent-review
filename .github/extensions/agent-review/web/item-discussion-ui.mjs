@@ -47,7 +47,16 @@ export class ItemDiscussionPane {
         this.stop = node("button", "Stop answer");
         this.stop.type = "button";
         this.stop.addEventListener("click", () => this.cancel().catch(this.notify));
-        this.form.append(this.label, this.input, this.send, this.stop);
+        this.retry = node("button", "Retry question", "hidden");
+        this.retry.type = "button";
+        this.retry.addEventListener("click", () => {
+            const question = this.thread?.messages.at(-2)?.content;
+            if (!question) return;
+            this.input.value = question;
+            if (this.draftKey) this.drafts.set(this.draftKey, question);
+            this.form.requestSubmit();
+        });
+        this.form.append(this.label, this.input, this.send, this.retry, this.stop);
         this.form.addEventListener("submit", (event) => {
             event.preventDefault();
             this.submit().catch(this.notify);
@@ -107,7 +116,7 @@ export class ItemDiscussionPane {
         const scroll = this.messages.scrollTop;
         const messages = [];
         for (const message of thread.messages) {
-            const signature = JSON.stringify([message.status, message.content, message.limitation, message.error, message.citations, message.evidence_scope, message.location]);
+            const signature = JSON.stringify([message.status, message.content, message.limitation, message.error, message.error_detail, message.citations, message.evidence_scope, message.location]);
             const existing = this.messageNodes.get(message.id);
             if (existing?.signature === signature) {
                 messages.push(existing.node);
@@ -132,8 +141,15 @@ export class ItemDiscussionPane {
                 article.append(node("p", "Earlier answer: supplied-context and saved-snapshot counts were not recorded. Verify any availability claims.", "muted"));
             }
             for (const citation of message.citations || []) article.append(this.sourceLink(citation));
-            if (["stopped", "error"].includes(message.status)) article.append(node("p",
-                `${message.status === "stopped" ? "Stopped" : "Could not complete"}: ${message.error || "No complete answer was produced."}`, "error"));
+            if (["stopped", "error"].includes(message.status)) {
+                article.append(node("p",
+                    `${message.status === "stopped" ? "Stopped" : "Could not complete"}: ${message.error || "No complete answer was produced."}`, "error"));
+                if (message.error_detail) {
+                    const details = node("details", "", "discussion-error-detail");
+                    details.append(node("summary", "Technical details"), node("p", message.error_detail, "muted"));
+                    article.append(details);
+                }
+            }
             messages.push(article);
             this.messageNodes.set(message.id, { node: article, signature });
         }
@@ -145,7 +161,18 @@ export class ItemDiscussionPane {
         this.messages.scrollTop = nearBottom ? this.messages.scrollHeight : scroll;
         const latest = thread.messages.at(-1);
         const running = latest?.status === "generating";
+        const failed = latest?.role === "assistant" && ["stopped", "error"].includes(latest.status);
+        const failedQuestion = failed ? thread.messages.at(-2)?.content || "" : "";
+        if (failedQuestion && this.restoredFailure !== latest.id) {
+            this.restoredFailure = latest.id;
+            if (!this.input.value.trim()) {
+                this.input.value = failedQuestion;
+                if (this.draftKey) this.drafts.set(this.draftKey, failedQuestion);
+            }
+        }
+        this.retry.classList.toggle("hidden", !failedQuestion || !this.available);
         this.send.disabled = !this.available || running;
+        this.retry.disabled = this.send.disabled;
         this.input.disabled = !this.available;
         this.stop.classList.toggle("hidden", !running);
         this.activity.textContent = !this.available ? "Copilot discussion is unavailable in this provider. Saved evidence is still available."
@@ -170,10 +197,16 @@ export class ItemDiscussionPane {
         try {
             const response = await this.api("/api/discussion", { method: "POST",
                 body: JSON.stringify({ id: item.id, question, location: this.viewedLocation() }) });
-            if (this.drafts.get(key) === question) this.drafts.delete(key);
-            if (this.item !== item) return;
-            if (this.input.value === question) this.input.value = "";
+            if (this.item !== item) {
+                if (this.drafts.get(key) === question) this.drafts.delete(key);
+                return;
+            }
             this.update(response.thread);
+            // A fast failure can arrive before this response; keep the restored question for retry.
+            const latest = this.thread?.messages.at(-1);
+            if (latest?.role === "assistant" && ["stopped", "error"].includes(latest.status)) return;
+            if (this.drafts.get(key) === question) this.drafts.delete(key);
+            if (this.input.value === question) this.input.value = "";
         } catch (error) {
             if (this.item !== item) {
                 this.notify(new Error(`Question for ${item.title || item.id} was not sent: ${error.message}`));

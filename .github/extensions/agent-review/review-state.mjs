@@ -26,6 +26,7 @@ import { pythonCandidates } from "./python-runtime.mjs";
 import { runReview } from "./review-pipeline.mjs";
 import { reviewIdentity } from "./review-pipeline.mjs";
 import { answerDiscussion } from "./item-discussion.mjs";
+import { ExplanationValidationError } from "./ai-response.mjs";
 import { contextForSection, sectionsFor } from "./review-sections-context.mjs";
 import { annotationCodeContext } from "./annotation-context.mjs";
 import { ReviewProgressStore, validateReviewCursor, validateReviewEntries } from "./review-progress.mjs";
@@ -1190,7 +1191,10 @@ export class ReviewState {
             Object.assign(message, answer, { status: "complete" });
         }, (error) => {
             message.status = controller.signal.aborted ? "stopped" : "error";
-            message.error = error.message;
+            if (message.status === "error" && error instanceof ExplanationValidationError) {
+                message.error = "Copilot could not produce a source-grounded answer. Retry, or rephrase the question.";
+                message.error_detail = error.message.slice(0, 600);
+            } else message.error = error.message;
         }).then(async () => {
             try { await this.saveDiscussion(thread); }
             catch (error) {

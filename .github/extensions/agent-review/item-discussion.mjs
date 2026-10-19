@@ -185,19 +185,32 @@ export function validateDiscussionResponse(content, context) {
         }
         return { evidence_id: evidence.id, path: evidence.path, side: evidence.side, line: citation.line };
     });
-    const requests = value.requests.map((request) => {
-        const path = typeof request.path === "string" ? posix.normalize(request.path.replaceAll("\\", "/")) : "";
-        if (!path || path === "." || path.length > 1000 || path.startsWith("/") || /^[A-Za-z][\w+.-]*:/.test(path)
+    const requests = [];
+    const invalid = [];
+    for (const request of value.requests) {
+        const raw = typeof request?.path === "string" ? request.path.trim() : "";
+        // Strict response schemas make models emit blank placeholder requests when they need none.
+        if (!raw && !(request?.start_line > 0) && !(request?.end_line > 0)) continue;
+        const path = posix.normalize(raw.replaceAll("\\", "/"));
+        if (!raw || path === "." || path.length > 1000 || path.startsWith("/") || /^[A-Za-z][\w+.-]*:/.test(path)
             || path === ".." || path.startsWith("../")
             || !["base", "current"].includes(request.side) || !Number.isSafeInteger(request.start_line)
             || request.start_line < 1 || !Number.isSafeInteger(request.end_line)
-            || request.end_line < request.start_line) {
-            throw new ExplanationValidationError(`Invalid saved range ${JSON.stringify(request).slice(0, 350)}. Use a repository-relative path, base/current side, and positive 1-based integer lines with end >= start.`);
-        }
-        return { ...request, path };
-    });
-    if (!value.requests.length && (!value.answer.trim() || (!citations.length && !value.limitation.trim()))) {
+            || request.end_line < request.start_line) invalid.push(request);
+        else requests.push({ ...request, path });
+    }
+    const answered = Boolean(value.answer.trim()) && Boolean(citations.length || value.limitation.trim());
+    // A usable final answer is not discarded because of a stray malformed follow-up request.
+    if (invalid.length && (requests.length || !answered)) {
+        throw new ExplanationValidationError(`Invalid saved range ${JSON.stringify(invalid[0]).slice(0, 350)}. Use a repository-relative path, base/current side, and positive 1-based integer lines with end >= start.`);
+    }
+    if (!requests.length && !answered) {
         throw new ExplanationValidationError("Discussion needs an answer with source citations or an explicit evidence limitation.");
+    }
+    if (invalid.length) {
+        const note = `${invalid.length} malformed source request${invalid.length === 1 ? " was" : "s were"} ignored.`;
+        return { content: value.answer.trim(), citations, requests,
+            limitation: value.limitation.trim() ? `${value.limitation.trim()} ${note}` : note };
     }
     return { content: value.answer.trim(), citations, requests, limitation: value.limitation.trim() };
 }
