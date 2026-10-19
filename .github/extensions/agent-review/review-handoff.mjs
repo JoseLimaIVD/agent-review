@@ -79,8 +79,15 @@ export function createReviewHandoff(model, target, progress, { testRun, warnings
     }
     const narrower = [...entries].filter(([id]) => !id.startsWith("review-file:"));
     if (narrower.length) {
-        lines.push("", "## Separate priority/group decisions", "These do not count as whole-file completion.");
-        for (const [id, entry] of narrower.slice(0, 20)) lines.push(`- ${code(id)}: ${text(entry.disposition)}${entry.note ? ` — ${text(entry.note)}` : ""}`);
+        lines.push("", "## Concern triage", "Triage explains why a concern was set aside; it does not mark files reviewed.");
+        const nodesById = new Map((model.nodes || []).map((node) => [node.id, node]));
+        const triageLabel = (id, entry) => {
+            const node = nodesById.get(id.replace(/^(?:review|section):/, ""));
+            const name = node?.display_name || node?.name;
+            const where = entry.path || node?.path;
+            return name ? `${text(name)}${where ? ` in ${code(where)}` : ""}` : code(id);
+        };
+        for (const [id, entry] of narrower.slice(0, 20)) lines.push(`- ${triageLabel(id, entry)}: ${text(entry.disposition)}${entry.note ? ` — ${text(entry.note)}` : ""}`);
         if (narrower.length > 20) lines.push(`- ${narrower.length - 20} additional scoped records are in the JSON state.`);
     }
     lines.push("", "## Verification and limits");

@@ -20,6 +20,7 @@ import { pruneStaleArtifacts } from "./storage-cleanup.mjs";
 import { buildReviewPrompt, reviewResponseSchema, validateReviewResponse } from "./review-pipeline.mjs";
 import { selectedModelFromEvents } from "./ai-response.mjs";
 import { buildDiscussionVerificationPrompt, discussionPrompt, discussionSchema, validateDiscussionResponse } from "./item-discussion.mjs";
+import { layerSummaryPrompt, layerSummarySchema, validateLayerSummaries } from "./layer-summaries.mjs";
 
 const instances = new Map();
 const pendingInstances = new Map();
@@ -121,6 +122,13 @@ function createReviewState(requestedPath, input) {
                 ...(!overview ? { verifyPrompt: (draft) => buildAnnotationVerificationPrompt(context, draft) } : {}),
             });
         },
+        generateLayerSummaries: async (context) => validateLayerSummaries(await generateIsolatedExplanation({
+            workingDirectory: state.repoRoot,
+            prompt: layerSummaryPrompt(context),
+            responseSchema: layerSummarySchema(context),
+            sourceEvents: await session.getEvents(),
+            validateResponse: (content) => { validateLayerSummaries(content, context); return content; },
+        }), context),
         generatePackageExplanation: async ({ dependency, assessment, usageContext }) => generateIsolatedExplanation({
             workingDirectory: state.repoRoot,
             prompt: buildPackagePrompt(dependency, assessment, usageContext),

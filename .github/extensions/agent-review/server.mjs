@@ -308,6 +308,10 @@ export function startReviewServer(state, options = {}) {
                 sendJson(res, { ok: true, annotation: await state.overviewFor() });
                 return;
             }
+            if (req.method === "POST" && pathname === "/api/layer-summaries") {
+                sendJson(res, { ok: true, annotation: await state.layerSummariesFor() });
+                return;
+            }
             if (req.method === "POST" && pathname === "/api/package-risk") {
                 const input = await readJson(req);
                 if (!input.name || typeof input.name !== "string") throw new Error("A package name is required.");

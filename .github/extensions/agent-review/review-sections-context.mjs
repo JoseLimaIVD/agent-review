@@ -1,5 +1,6 @@
 import { reviewIdentity } from "./review-pipeline.mjs";
 import { reviewSections } from "./web/review-sections.mjs";
+import { changedFileRelations } from "./change-relations.mjs";
 
 const cached = new WeakMap();
 
@@ -16,6 +17,7 @@ export function sectionsFor(model, review = null) {
         snapshot: reviewIdentity(model, "review-sections-v1", null), sections,
         represented_files: changed.length, analysis_status: review?.status || "not requested",
         analysis_coverage: review?.coverage || null,
+        file_relations: changedFileRelations(model),
         note: "Source-derived grouping is not completed AI analysis. Linked tests are static evidence unless a saved execution result says otherwise.",
     };
     cached.set(model, { review, value });

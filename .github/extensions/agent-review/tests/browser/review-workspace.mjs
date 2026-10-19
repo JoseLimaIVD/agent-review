@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join } from "node:path";
-import { workspaceNavigation } from "../../web/review-workspace.mjs";
+import { reviewSequence, workspaceNavigation } from "../../web/review-workspace.mjs";
 
 const url = process.env.AGENT_REVIEW_UX_URL;
 if (!url) throw new Error("Set AGENT_REVIEW_UX_URL to an actual review.");
@@ -25,7 +25,7 @@ try {
         await page.waitForFunction(() => document.querySelector("#source")?.getAttribute("aria-busy") !== "true"
             && document.querySelector("#source")?.querySelector(".code-row"));
         try {
-            await page.waitForFunction(() => document.querySelector("#workspace-count")?.textContent.includes("review group"));
+            await page.waitForFunction(() => /\d+ layers?/.test(document.querySelector("#workspace-count")?.textContent || ""));
         } catch (error) {
             console.error(JSON.stringify({ theme, errors, grouping: await page.locator("#workspace-count").textContent(),
                 notice: await page.locator("#error").textContent(), source: await page.locator("#source-title").textContent() }));
@@ -64,7 +64,7 @@ try {
         assert.equal(await page.locator("#source-title").textContent(), title);
         const sections = await fetch(new URL("/api/review-sections", url)).then((response) => response.json());
         const navigation = workspaceNavigation(snapshot.model, sections);
-        const sequence = navigation.groups.flatMap((group) => group.files.map((file) => ({ path: file.path, group: group.id })));
+        const sequence = reviewSequence(navigation).map(({ path, group }) => ({ path, group }));
         const selected = await page.locator(".workspace-file[aria-current='location']").first().evaluate((button) =>
             ({ path: button.dataset.path, group: button.dataset.group }));
         let cursor = sequence.findIndex((entry) => entry.path === selected.path && entry.group === selected.group);

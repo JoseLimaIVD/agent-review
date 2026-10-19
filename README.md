@@ -57,8 +57,17 @@ are a starting point, not a claim that all changed code has been reviewed.
 metadata, metrics, provenance and custom-check controls when needed.
 
 The **Review** workspace keeps a **Groups / Files** navigation spine beside the
-saved source. Groups use source-backed contracts and consumers; supporting files
-remain explicitly accessible, and the file count includes every changed file.
+saved source. **Groups** reads the change as ordered **layers**: areas of code
+(for example backend, utilities, user interface) ordered foundations-first by
+the saved call and import relationships between them, with "builds on" links.
+Each layer carries one short, AI-labelled sentence describing what the change
+does there, generated once from that layer's saved diffs; until it arrives (or
+when Copilot is unavailable) the layer lists its changed symbols instead.
+Within a layer each changed file appears exactly once, with its consumers and
+tests listed beneath it and tagged by role (consumer, test, import-linked, or
+name-matched test); identical implementations across many files stay one
+group, and supporting files form a final layer. The file count includes every
+changed file.
 **Impact** opens within the same review; **Return to code** restores the source
 side, reading position and item context. **Overview / Review** lets you return
 to the change story without discarding the current reading point.
@@ -81,8 +90,10 @@ Whole-file review decisions have a clear finish line: **Not reviewed**,
 whole-file decision and advances only after the save succeeds. File notes and
 the reading point are stored in the Copilot session workspace, independently of
 the canvas's local server port; a provider without a workspace explicitly
-identifies memory-only storage. Existing priority and group decisions are kept
-separately and never silently promoted into whole-file completion.
+identifies memory-only storage. Whole-file decisions are the single measure of
+progress: the focused priority queue derives its progress from them, and the
+optional per-concern triage (accepted risk, false positive, follow-up) explains
+why a concern was set aside without marking files reviewed.
 **Review all group files** requires an explicit scope confirmation and preserves
 existing notes. **Finish** lists pending work, follow-ups, retained finer-grained
 decisions and verification limits. Human completion does not resolve findings,

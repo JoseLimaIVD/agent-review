@@ -15,7 +15,7 @@ import { buildReviewPlan } from "/review-plan.mjs";
 import { fileTree, groupForSource, reviewSequence, workspaceNavigation } from "/review-workspace.mjs";
 import { countLabel, plural } from "/count-format.mjs";
 import {
-    REVIEW_DISPOSITIONS, fileReviewId, fileReviewProgress, isReviewComplete, nextFileReview, nextReviewItem, parseReviewLedger, reviewProgress,
+    REVIEW_DISPOSITIONS, effectiveDisposition, fileReviewId, fileReviewProgress, isReviewComplete, nextFileReview, nextReviewItem, parseReviewLedger, reviewProgress,
     reviewSnapshotKey, serializeReviewLedger,
 } from "/review-ledger.mjs";
 import {
@@ -279,24 +279,66 @@ for (const [button, pane] of [[elements.workspace_code, "code"], [elements.works
     });
 }
 
+const reviewStateLabel = (value) => Object.fromEntries(REVIEW_DISPOSITIONS)[value] || value;
+
+// One grounded AI intent line per layer; the deterministic summary stays visible until it arrives or if it fails.
+function ensureLayerSummaries() {
+    const generation = state.payload?.review_generation;
+    if (!state.payload || state.payload.annotations?.layers || state.layerSummaryRequested === generation) return;
+    state.layerSummaryRequested = generation;
+    api("/api/layer-summaries", { method: "POST", body: "{}" }).then((result) => {
+        if (state.payload?.review_generation !== generation) return;
+        state.payload.annotations = { ...(state.payload.annotations || {}), layers: result.annotation };
+        state.navigationKey = null;
+        renderWorkspaceNavigation();
+        renderReviewOverview();
+    }, (error) => { state.layerSummaryError = error.message; });
+}
+
+// Long file names wrap at dots, dashes and underscores before ever breaking inside a word.
+function breakableName(text) {
+    const fragment = document.createDocumentFragment();
+    for (const part of String(text).split(/(?<=[._-])/)) fragment.append(document.createTextNode(part), document.createElement("wbr"));
+    return fragment;
+}
+
+function bulkReviewLink(entry, text) {
+    const mark = el("button", "link-button", text);
+    mark.type = "button";
+    mark.addEventListener("click", () => {
+        state.bulkReviewGroup = entry;
+        elements.group_review_error.classList.add("hidden");
+        elements.group_review_title.textContent = `Mark ${entry.files.length} files reviewed`;
+        elements.group_review_scope.textContent = `${entry.title}. This includes every changed file in this group, not just files matching the current filter. Existing notes are kept.`;
+        elements.group_review_confirm.disabled = !state.progressReady || state.progressSaving;
+        elements.group_review_dialog.showModal();
+    });
+    return mark;
+}
+
 function renderWorkspaceNavigation() {
     if (!state.payload?.model || state.reviewPage !== "review") return;
     const data = ensureSectionData();
     const navigation = workspaceNavigation(state.payload.model, data);
     state.workspaceNavigation = navigation;
-    const location = state.source || state.workspaceReturn?.source;
+    const location = state.pendingSource || state.source || state.workspaceReturn?.source;
     const group = groupForSource(navigation, location, state.activeReviewGroup);
     if (group) state.activeReviewGroup = group.id;
     const changedFile = location && navigation.files.some((file) => file.path === location.path);
-    elements.workspace_group_label.textContent = group?.title
-        || (changedFile ? "Changed file · this line is outside its grouped change ranges"
+    const layer = group && navigation.layers.find((item) => item.id === group.layer);
+    const groupLabel = group?.label || group?.title;
+    elements.workspace_group_label.textContent = group ? `${layer && navigation.layers.length > 1
+        ? `${layer.number ? `${layer.number}. ` : ""}${layer.name}${groupLabel === layer.name ? "" : " › "}` : ""}${groupLabel === layer?.name && navigation.layers.length > 1 ? "" : groupLabel}`
+        : (changedFile ? "Changed file · this line is outside its grouped change ranges"
             : state.source ? "Related source outside the changed-file groups" : "Choose a group or file");
     const query = state.navigationQuery.toLowerCase().trim();
-    const key = `${state.payload.review_generation}:${state.sectionDataKey}:${state.navigationMode}:${query}`;
+    if (data) ensureLayerSummaries();
+    const key = `${state.payload.review_generation}:${state.sectionDataKey}:${state.navigationMode}:${query}:${state.payload.annotations?.layers?.generated_at || ""}`;
     elements.workspace_groups.setAttribute("aria-pressed", String(state.navigationMode === "groups"));
     elements.workspace_files.setAttribute("aria-pressed", String(state.navigationMode === "files"));
+    const storyLayers = navigation.layers.filter((item) => !item.supporting).length;
     elements.workspace_count.textContent = `${countLabel(navigation.files.length, "changed file")} · ${
-        data ? countLabel(navigation.groups.length, "review group") : state.sectionError ? "Grouping unavailable; files remain accessible" : "Grouping saved changes…"}`;
+        data ? countLabel(storyLayers || navigation.layers.length, "layer") : state.sectionError ? "Grouping unavailable; files remain accessible" : "Grouping saved changes…"}`;
     elements.workspace_group_retry.classList.toggle("hidden", !state.sectionError);
     if (state.navigationKey !== key) {
         state.navigationKey = key;
@@ -323,41 +365,111 @@ function renderWorkspaceNavigation() {
         };
         if (state.navigationMode === "files") {
             appendTree(list, fileTree(navigation.files.filter((file) => !query || file.path.toLowerCase().includes(query))), null);
-        } else for (const entry of navigation.groups) {
-            const matches = !query || entry.title.toLowerCase().includes(query);
-            const files = entry.files.filter((file) => matches || file.path.toLowerCase().includes(query));
-            if (!files.length) continue;
-            const details = el("details", "workspace-group");
-            details.dataset.group = entry.id;
-            const summary = el("summary", "");
-            const open = el("button", "", entry.title);
-            open.type = "button";
-            open.title = entry.section?.summary || entry.title;
-            open.addEventListener("click", (event) => {
-                event.preventDefault();
-                details.open = true;
-                const first = entry.section?.ranges.find((range) => files.some((file) => file.path === range.path));
-                const file = files.find((file) => file.path === first?.path) || files[0];
-                openWorkspaceFile(file, entry).catch(showError);
-            });
-            const progress = el("span", "muted", String(files.length));
-            progress.dataset.groupProgress = entry.id;
-            summary.append(open, progress);
-            details.append(summary);
-            appendTree(details, fileTree(files), entry);
-            const mark = el("button", "link-button", "Review all group files…");
-            mark.type = "button";
-            mark.addEventListener("click", () => {
-                state.bulkReviewGroup = entry;
-                elements.group_review_error.classList.add("hidden");
-                elements.group_review_title.textContent = `Mark ${entry.files.length} files reviewed`;
-                elements.group_review_scope.textContent = `${entry.title}. This includes every changed file in this group, not just files matching the current filter. Existing notes are kept.`;
-                elements.group_review_confirm.disabled = !state.progressReady || state.progressSaving;
-                elements.group_review_dialog.showModal();
-            });
-            details.append(mark);
-            if (query) details.open = true;
-            list.append(details);
+        } else for (const layer of navigation.layers) {
+            const layerGroups = layer.groups.map((entry) => {
+                const matches = !query || `${entry.label} ${layer.name}`.toLowerCase().includes(query);
+                return { entry, files: entry.files.filter((file) => matches || file.path.toLowerCase().includes(query)) };
+            }).filter(({ files }) => files.length);
+            if (!layerGroups.length) continue;
+            const section = el("details", "workspace-layer");
+            section.open = true;
+            section.dataset.layer = layer.id;
+            const heading = el("summary", "workspace-layer-heading");
+            const name = el("span", "workspace-layer-name");
+            name.append(el("span", "workspace-layer-number", layer.number ? String(layer.number) : "·"), el("strong", "", layer.name));
+            const meta = el("span", "workspace-layer-meta");
+            if (layer.path && layer.path !== "/" && !layer.supporting) meta.append(el("code", "", layer.path));
+            for (const dependency of layer.dependsOn) {
+                meta.append(el("span", "workspace-layer-depends", `builds on ${dependency.number}. ${dependency.name} — ${dependency.example}`));
+            }
+            const progress = el("span", "workspace-layer-progress muted");
+            progress.dataset.layerProgress = layer.id;
+            const intent = state.payload.annotations?.layers?.intents?.[layer.id];
+            let intentLine = null;
+            if (intent) {
+                intentLine = el("span", "workspace-layer-intent");
+                intentLine.append(el("span", "workspace-layer-ai", "AI"), document.createTextNode(intent));
+                intentLine.title = `${intent}\n\nAI interpretation of this layer's saved diff. Verify in the code.`;
+            } else if (layer.summary) intentLine = el("span", "workspace-layer-intent workspace-layer-fallback", layer.summary);
+            heading.append(name, progress, ...(intentLine ? [intentLine] : []), meta);
+            section.append(heading);
+            for (const { entry, files } of layerGroups) {
+                if (entry.supporting) {
+                    const tree = el("div", "workspace-supporting");
+                    tree.dataset.group = entry.id;
+                    appendTree(tree, fileTree(files), entry);
+                    tree.append(bulkReviewLink(entry, "Review all supporting files…"));
+                    section.append(tree);
+                    continue;
+                }
+                if (entry.tree) {
+                    const details = el("details", "workspace-group");
+                    details.dataset.group = entry.id;
+                    const summary = el("summary", "");
+                    const open = el("button", "", entry.title);
+                    open.type = "button";
+                    open.title = entry.section?.summary || entry.title;
+                    open.addEventListener("click", (event) => {
+                        event.preventDefault();
+                        details.open = true;
+                        const first = entry.section?.ranges.find((range) => files.some((file) => file.path === range.path));
+                        openWorkspaceFile(files.find((file) => file.path === first?.path) || files[0], entry).catch(showError);
+                    });
+                    const count = el("span", "muted", String(files.length));
+                    count.dataset.groupProgress = entry.id;
+                    summary.append(open);
+                    if (layer.groups.length > 1) summary.append(count);
+                    details.append(summary);
+                    appendTree(details, fileTree(files), entry);
+                    details.append(bulkReviewLink(entry, "Review all group files…"));
+                    if (query) details.open = true;
+                    section.append(details);
+                    continue;
+                }
+                const block = el("div", "workspace-file-group");
+                block.dataset.group = entry.id;
+                for (const file of files) {
+                    const role = entry.roles.get(file.path);
+                    const primary = role === "changed";
+                    const button = el("button", `workspace-file${primary ? " workspace-primary" : " workspace-attached"}`);
+                    button.type = "button";
+                    button.dataset.path = file.path;
+                    button.dataset.group = entry.id;
+                    button.dataset.role = role;
+                    if (primary && entry.subtitle && file.path === entry.primaries[0]) button.dataset.symbols = entry.subtitle;
+                    button.title = file.path;
+                    const label = el("span", "workspace-file-name");
+                    label.append(breakableName(file.path.split("/").at(-1)));
+                    button.append(label);
+                    if (primary && entry.subtitle && file.path === entry.primaries[0]) {
+                        const symbols = el("span", "workspace-file-symbols");
+                        symbols.append(breakableName(entry.subtitle));
+                        button.append(symbols);
+                    }
+                    if (!primary) button.append(el("span", "workspace-role", role));
+                    button.addEventListener("click", () => openWorkspaceFile(file, entry).catch(showError));
+                    block.append(button);
+                }
+                if (entry.related.length) {
+                    const related = el("span", "workspace-related muted", "Also changes ");
+                    entry.related.slice(0, 3).forEach((item, index) => {
+                        const target = navigation.groups.find((group) => group.id === item.group);
+                        const link = el("button", "link-button", item.path.split("/").at(-1));
+                        link.type = "button";
+                        link.title = `Open ${item.path}, listed with its own file`;
+                        link.addEventListener("click", () => {
+                            const file = target?.files.find((candidate) => candidate.path === item.path);
+                            if (file) openWorkspaceFile(file, target).catch(showError);
+                        });
+                        related.append(...(index ? [document.createTextNode(", ")] : []), link);
+                    });
+                    if (entry.related.length > 3) related.append(document.createTextNode(` +${entry.related.length - 3}`));
+                    related.append(document.createTextNode(" (listed with its own file)"));
+                    block.append(related);
+                }
+                section.append(block);
+            }
+            list.append(section);
         }
         if (!list.childElementCount) list.append(el("p", "muted", "No changed files match this filter."));
     }
@@ -373,11 +485,19 @@ function renderWorkspaceNavigation() {
         } else button.removeAttribute("aria-current");
         const disposition = state.reviewLedger.get(fileReviewId(button.dataset.path))?.disposition || "pending";
         button.dataset.reviewState = disposition;
-        button.setAttribute("aria-label", `${button.dataset.path} · ${disposition}`);
+        button.setAttribute("aria-label", `${button.dataset.path}${button.dataset.role && button.dataset.role !== "changed" ? `, ${button.dataset.role}` : ""}${
+            button.dataset.symbols ? `, changes ${button.dataset.symbols}` : ""} · ${reviewStateLabel(disposition)}`);
     }
+    const reviewedIn = (files) => files.filter((file) => state.reviewLedger.get(fileReviewId(file.path))?.disposition === "reviewed").length;
     for (const count of elements.workspace_nav_list.querySelectorAll("[data-group-progress]")) {
         const entry = navigation.groups.find((group) => group.id === count.dataset.groupProgress);
-        if (entry) count.textContent = `${entry.files.filter((file) => state.reviewLedger.get(fileReviewId(file.path))?.disposition === "reviewed").length}/${entry.files.length}`;
+        if (entry) count.textContent = `${reviewedIn(entry.files)}/${entry.files.length}`;
+    }
+    for (const count of elements.workspace_nav_list.querySelectorAll("[data-layer-progress]")) {
+        const entry = navigation.layers.find((layer) => layer.id === count.dataset.layerProgress);
+        const files = entry?.groups.flatMap((group) => group.files) || [];
+        count.textContent = `${reviewedIn(files)}/${files.length}`;
+        count.title = `${reviewedIn(files)} of ${countLabel(files.length, "file")} in this layer marked reviewed`;
     }
 }
 
@@ -389,11 +509,30 @@ async function openWorkspaceFile(file, group = null) {
     state.activeReviewGroup = group?.id || null;
     state.navigationCursor = { path: file.path, group: group?.id || null };
     state.mode = "walkthrough";
+    // Show the destination immediately; slow source loads must not look like ignored key presses.
+    const pending = { path: file.path };
+    state.pendingSource = pending;
+    elements.source_title.textContent = `${file.path} · loading…`;
+    elements.source.setAttribute("aria-busy", "true");
+    renderWorkspaceNavigation();
     const range = group?.section?.ranges.find((range) => range.path === file.path && range.side !== "base")
         || group?.section?.ranges.find((range) => range.path === file.path);
     const node = range?.symbol_id && state.payload.model.nodes.find((node) => node.id === range.symbol_id);
-    if (node) await selectItem(node, false);
-    else await selectFile(file, false);
+    try {
+        if (node) await selectItem(node, false);
+        else await selectFile(file, false);
+    } finally {
+        if (state.pendingSource === pending) {
+            state.pendingSource = null;
+            if (state.source?.path !== file.path) {
+                elements.source.removeAttribute("aria-busy");
+                elements.source_title.textContent = state.source
+                    ? `${state.source.path}${state.source.start_line ? `:${state.source.start_line}` : ""}` : "";
+                renderWorkspaceNavigation();
+            }
+        }
+    }
+    if (state.navigationCursor?.path !== file.path) return;
     renderWorkspaceShell();
     if (state.source) elements.source.focus({ preventScroll: true });
 }
@@ -1136,9 +1275,23 @@ async function persistReviewEntries(entries, cursor = currentReviewCursor(), { q
     state.progressSaving = true;
     state.progressError = null;
     renderFileReview();
+    const save = (revision, values) => api("/api/review-progress", { method: "POST",
+        body: JSON.stringify({ snapshot: key, revision, entries: Object.fromEntries(values), cursor }) });
     try {
-        const record = await api("/api/review-progress", { method: "POST",
-            body: JSON.stringify({ snapshot: key, revision: state.progressRevision, entries: Object.fromEntries(entries), cursor }) });
+        let record;
+        try { record = await save(state.progressRevision, entries); }
+        catch (error) {
+            if (error.status !== 409) throw error;
+            // Another tab saved (often only a reading position). Rebase this change if it touched none of the same records.
+            const latest = await api("/api/review-progress");
+            if (latest.snapshot !== key) throw error;
+            const base = state.reviewLedger;
+            const changed = new Set([...entries.keys(), ...base.keys()].filter((id) => JSON.stringify(entries.get(id)) !== JSON.stringify(base.get(id))));
+            if ([...changed].some((id) => JSON.stringify(latest.entries[id]) !== JSON.stringify(base.get(id)))) throw error;
+            const merged = new Map(Object.entries(latest.entries));
+            for (const id of changed) entries.has(id) ? merged.set(id, entries.get(id)) : merged.delete(id);
+            record = await save(latest.revision, merged);
+        }
         if (state.reviewLedgerStorageKey !== key) return false;
         state.reviewLedger = parseReviewLedger(JSON.stringify(record.entries));
         state.progressRevision = record.revision;
@@ -1342,7 +1495,9 @@ function renderFinishReview() {
         panel.append(button);
     }
     const legacy = [...state.reviewLedger].filter(([id]) => !id.startsWith("review-file:"));
-    if (legacy.length) panel.append(el("p", "muted", `${countLabel(legacy.length, "priority/group decision")} retained separately; these were not promoted to whole-file completion.`));
+    const triagedFollowUp = legacy.filter(([, entry]) => entry.disposition === "follow-up").length;
+    if (legacy.length) panel.append(el("p", "muted", `${countLabel(legacy.length, "concern")} triaged${
+        triagedFollowUp ? ` (${triagedFollowUp} need follow-up)` : ""}. Triage explains a concern but does not mark files reviewed.`));
     const findings = groupFindings(model.attention || []);
     panel.append(el("p", "", `${countLabel(findings.filter((item) => !isFindingClosed(item, state.closedFindingKeys)).length, "active concern")} remain in the saved findings.`));
     const tests = state.payload.test_run;
@@ -1752,10 +1907,12 @@ function renderSections(model) {
     }
     const behavior = data.sections.filter((section) => section.kind === "behavior");
     const supporting = data.sections.filter((section) => section.kind !== "behavior");
-    const reviewed = behavior.filter((section) => state.reviewLedger.get(section.id)?.disposition === "reviewed").length;
+    const sectionFiles = (section) => [...new Set(section.ranges.map((range) => range.path))];
+    const filesReviewed = (section) => sectionFiles(section).filter((path) => state.reviewLedger.get(fileReviewId(path))?.disposition === "reviewed").length;
+    const reviewed = behavior.filter((section) => filesReviewed(section) === sectionFiles(section).length).length;
     const list = el("div", "review-sections");
-    list.append(el("p", "", `${countLabel(behavior.length, "behavior section")} · ${countLabel(data.represented_files, "changed file")} represented · ${countLabel(reviewed, "section")} marked reviewed`),
-        el("p", "muted", `AI analysis: ${data.analysis_status}. ${data.note}`));
+    list.append(el("p", "", `${countLabel(behavior.length, "behavior section")} · ${countLabel(data.represented_files, "changed file")} represented · ${countLabel(reviewed, "section")} with every file reviewed`),
+        el("p", "muted", `These are the analyzer's source-linked sections. Progress comes from whole-file decisions in the Review rail. AI analysis: ${data.analysis_status}. ${data.note}`));
     const number = new Map(data.sections.map((section) => [section.id, section.number]));
     const focusLocation = state.sectionFocus;
     const focusedSection = focusLocation && (data.sections.find((section) => section.ranges.some((range) =>
@@ -1809,15 +1966,8 @@ function renderSections(model) {
             state.sourceReturnFocus = ask;
             discussItem({ id: section.id, kind: "section", title: section.title, path: section.ranges[0].path }).catch(showError);
         });
-        const mark = el("button", "", state.reviewLedger.get(section.id)?.disposition === "reviewed" ? "Reopen section" : "Mark section reviewed");
-        mark.type = "button";
-        mark.addEventListener("click", () => {
-            setReviewDisposition({ id: section.id, path: section.ranges[0].path },
-                state.reviewLedger.get(section.id)?.disposition === "reviewed" ? "pending" : "reviewed");
-            const target = [...elements.graph.querySelectorAll(".section-card")].find((node) => node.dataset.sectionId === section.id);
-            target?.querySelector("summary").focus({ preventScroll: true });
-        });
-        actions.append(ask, mark);
+        const progress = el("span", "muted", `${filesReviewed(section)} of ${countLabel(sectionFiles(section).length, "file")} reviewed`);
+        actions.append(ask, progress);
         details.append(actions);
         const ranges = el("details", "section-ranges");
         ranges.open = state.openSectionRangeKeys?.has(section.id) || false;
@@ -1855,8 +2005,8 @@ function renderSections(model) {
     const other = supporting.filter(matches);
     if (other.length) {
         const details = el("details", "section-card supporting-sections");
-        details.append(el("summary", "", `${countLabel(other.length, "supporting file")} without a verified behavioral owner`),
-            el("p", "muted", "These files remain in scope. They are grouped for navigation, not claimed to share one behavior."));
+        details.append(el("summary", "", `${countLabel(other.length, "supporting file")} without an analyzer section`),
+            el("p", "muted", "These files remain in scope. The Review rail may still attach some of them to a file by an import or call found in this change, or by a matching test name."));
         details.addEventListener("toggle", () => {
             if (!details.isConnected) return;
             if (!details.open || details.dataset.loaded) return;
@@ -3824,7 +3974,7 @@ function renderReviewPlan(model, findings) {
     );
     if (progress.total) {
         introCopy.append(el("p", "review-progress",
-            `${progress.completed.toLocaleString()} of ${countLabel(progress.total, "item")} reviewed${
+            `${progress.completed.toLocaleString()} of ${countLabel(progress.total, "item")} reviewed (from file decisions and concern triage)${
                 progress.followUp ? ` · ${countLabel(progress.followUp, "item")} ${plural(progress.followUp, "needs", "need")} follow-up` : ""}${
                 allPlan.omitted ? ` · ${countLabel(allPlan.omitted, "additional qualifying change")} omitted` : ""}`));
     }
@@ -3847,7 +3997,7 @@ function renderReviewPlan(model, findings) {
     const dispositionLabels = Object.fromEntries(REVIEW_DISPOSITIONS);
     for (const [index, item] of plan.entries()) {
         const record = state.reviewLedger.get(item.id);
-        const disposition = record?.disposition || "pending";
+        const disposition = effectiveDisposition(item, state.reviewLedger);
         const row = el("button", "review-plan-row");
         row.type = "button";
         row.dataset.reviewId = item.id;
@@ -4396,12 +4546,15 @@ function renderSourceRisk() {
     const record = state.reviewLedger.get(item.id);
     const controls = el("div", "source-review-controls");
     const dispositionLabel = el("label", "");
-    dispositionLabel.append(document.createTextNode("Disposition"));
+    dispositionLabel.append(document.createTextNode("Triage"));
     const disposition = el("select", "source-review-disposition");
-    for (const [value, label] of REVIEW_DISPOSITIONS) {
+    // Triage explains a concern; review progress itself is the whole-file decision.
+    const current = record?.disposition || "pending";
+    for (const [value, label] of [["pending", "Not triaged"], ["follow-up", "Needs follow-up"], ["accepted", "Accepted risk"],
+        ["false-positive", "False positive"], ...(current === "reviewed" ? [["reviewed", "Reviewed (earlier record)"]] : [])]) {
         const option = el("option", "", label);
         option.value = value;
-        option.selected = (record?.disposition || "pending") === value;
+        option.selected = current === value;
         disposition.append(option);
     }
     dispositionLabel.append(disposition);
@@ -4411,7 +4564,7 @@ function renderSourceRisk() {
     note.value = record?.note || "";
     note.placeholder = `Review note for ${state.source.path}:${state.source.start_line || item.line || 1}`;
     note.setAttribute("aria-label", "Review note");
-    const save = el("button", "source-review-save", "Save priority decision");
+    const save = el("button", "source-review-save", "Save triage");
     save.type = "button";
     const saveEntry = () => setReviewDisposition(item, disposition.value, note.value);
     save.addEventListener("click", saveEntry);
@@ -4423,7 +4576,11 @@ function renderSourceRisk() {
     });
     controls.append(dispositionLabel, note, save);
     const priority = el("details", "priority-review-details");
-    priority.append(el("summary", "", "Priority-only decision (separate from whole-file review)"), controls);
+    const triaged = current !== "pending" && current !== "reviewed";
+    priority.append(el("summary", "", triaged
+            ? `Concern triage: ${reviewStateLabel(current)}${record?.note ? ` — ${record.note}` : ""}`
+            : "Triage this concern (optional): accepted risk, false positive or follow-up"),
+        el("p", "muted", "Review progress comes from the whole-file decision below; triage records why a concern can be set aside."), controls);
     panel.append(reasons, priority);
 }
 
@@ -5438,12 +5595,14 @@ window.addEventListener("keydown", (event) => {
     if (key === "j" || key === "k") {
         event.preventDefault();
         if (state.reviewPage === "review" && !state.exploring && state.workspaceNavigation) {
-            const sequence = state.navigationMode === "groups"
-                ? state.workspaceNavigation.groups.flatMap((group) => group.files.map((file) => ({ file, group })))
-                : state.workspaceNavigation.files.map((file) => ({ file, group: null }));
+            const groupsById = new Map(state.workspaceNavigation.groups.map((group) => [group.id, group]));
+            const sequence = reviewSequence(state.workspaceNavigation, state.navigationMode)
+                .map((entry) => ({ file: entry.file, group: entry.group ? groupsById.get(entry.group) : null }));
             const cursor = state.navigationCursor || { path: (state.source || state.workspaceReturn?.source)?.path, group: state.activeReviewGroup };
             let current = sequence.findIndex((entry) => entry.file.path === cursor.path
                 && (!entry.group || entry.group.id === cursor.group));
+            // The cursor may name a provisional group recorded before review groups finished loading.
+            if (current < 0) current = sequence.findIndex((entry) => entry.file.path === cursor.path);
             if (current < 0) current = key === "j" ? -1 : 0;
             const next = sequence[(current + (key === "j" ? 1 : sequence.length - 1) + sequence.length) % sequence.length];
             if (next) openWorkspaceFile(next.file, next.group).catch(showError);

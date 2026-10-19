@@ -32,8 +32,8 @@ try {
             await page.locator("#source-panel").waitFor();
             await page.locator("#source-section").click();
             assert.equal(await page.evaluate(() => document.activeElement?.tagName), "SUMMARY");
-            await first.getByRole("button", { name: "Mark section reviewed", exact: true }).click();
-            assert.ok(await first.getByRole("button", { name: "Reopen section", exact: true }).count());
+            assert.match(await first.textContent(), /\d+ of \d+ files? reviewed/, "section progress derives from whole-file decisions");
+            assert.equal(await first.getByRole("button", { name: "Mark section reviewed", exact: true }).count(), 0);
             await first.getByRole("button", { name: "Ask about section", exact: true }).click();
             await page.locator("#item-question").waitFor();
             await page.locator("#item-discussion").getByText(/Read-only/).waitFor();

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { ReviewProgressStore } from "../review-progress.mjs";
-import { fileReviewId, fileReviewProgress, nextFileReview } from "../web/review-ledger.mjs";
+import { effectiveDisposition, fileReviewId, fileReviewProgress, nextFileReview, nextReviewItem, reviewProgress } from "../web/review-ledger.mjs";
 import { ReviewState } from "../review-state.mjs";
 import { startReviewServer } from "../server.mjs";
 
@@ -16,6 +16,17 @@ test("whole-file completion never promotes a smaller priority or group acknowled
     entries.set(fileReviewId("a.js"), { disposition: "reviewed" });
     assert.equal(fileReviewProgress(model, entries).reviewed, 1);
     assert.equal(nextFileReview(model.changes, entries, "a.js").path, "b.js");
+});
+test("priority queue progress derives from whole-file decisions while concern triage still counts", () => {
+    const plan = [{ id: "review:one", path: "a.js" }, { id: "review:two", path: "b.js" }, { id: "review:three", path: "c.js" }];
+    const entries = new Map([[fileReviewId("a.js"), { disposition: "reviewed" }],
+        ["review:two", { disposition: "false-positive" }], [fileReviewId("c.js"), { disposition: "follow-up" }]]);
+    assert.equal(effectiveDisposition(plan[0], entries), "reviewed", "a reviewed file reviews its priority item");
+    assert.equal(effectiveDisposition(plan[1], entries), "false-positive");
+    assert.deepEqual(reviewProgress(plan, entries), { completed: 2, followUp: 1, total: 3 });
+    assert.equal(nextReviewItem(plan, entries).id, "review:three");
+    assert.deepEqual(fileReviewProgress({ changes: plan.map((item) => ({ path: item.path, status: "modified" })) }, entries),
+        { total: 3, reviewed: 1, followUp: 1, pending: 1 }, "triage never marks a file reviewed");
 });
 test("session progress and cursor survive a new store instance without browser-origin dependence", async (t) => {
     const root = await mkdtemp(join(tmpdir(), "review-progress-"));

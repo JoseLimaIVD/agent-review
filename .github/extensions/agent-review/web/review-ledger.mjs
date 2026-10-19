@@ -60,11 +60,18 @@ export function serializeReviewLedger(entries) {
     return JSON.stringify(Object.fromEntries(entries), null, 0);
 }
 
+// One progress model: a priority item without its own triage inherits its file's whole-file decision.
+export function effectiveDisposition(item, entries) {
+    const own = entries.get(item.id)?.disposition;
+    if (own && own !== "pending") return own;
+    return (item.path && entries.get(fileReviewId(item.path))?.disposition) || "pending";
+}
+
 export function reviewProgress(plan, entries) {
     let completed = 0;
     let followUp = 0;
     for (const item of plan) {
-        const disposition = entries.get(item.id)?.disposition || "pending";
+        const disposition = effectiveDisposition(item, entries);
         if (completedDispositions.has(disposition)) completed += 1;
         if (disposition === "follow-up") followUp += 1;
     }
@@ -72,8 +79,8 @@ export function reviewProgress(plan, entries) {
 }
 
 export function nextReviewItem(plan, entries) {
-    return plan.find((item) => !entries.has(item.id) || entries.get(item.id).disposition === "pending")
-        || plan.find((item) => entries.get(item.id)?.disposition === "follow-up")
+    return plan.find((item) => effectiveDisposition(item, entries) === "pending")
+        || plan.find((item) => effectiveDisposition(item, entries) === "follow-up")
         || null;
 }
 

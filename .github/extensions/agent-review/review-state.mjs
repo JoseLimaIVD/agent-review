@@ -26,6 +26,8 @@ import { pythonCandidates } from "./python-runtime.mjs";
 import { runReview } from "./review-pipeline.mjs";
 import { reviewIdentity } from "./review-pipeline.mjs";
 import { answerDiscussion } from "./item-discussion.mjs";
+import { layerSummaryContext } from "./layer-summaries.mjs";
+import { workspaceNavigation } from "./web/review-workspace.mjs";
 import { ExplanationValidationError } from "./ai-response.mjs";
 import { contextForSection, sectionsFor } from "./review-sections-context.mjs";
 import { annotationCodeContext } from "./annotation-context.mjs";
@@ -306,6 +308,7 @@ export class ReviewState {
         this.reviewLimits = options.reviewLimits || {};
         this.reviewControllers = new Set();
         this.generateDiscussion = options.generateDiscussion || null;
+        this.generateLayerSummaries = options.generateLayerSummaries || null;
         this.discussionThreads = new Map();
         this.discussionLoads = new Map();
         this.discussionRuns = new Map();
@@ -1628,6 +1631,30 @@ export class ReviewState {
                 if (this.annotationPromises.get(id) === promise) this.annotationPromises.delete(id);
             });
         this.annotationPromises.set(id, promise);
+        return promise;
+    }
+
+    async layerSummariesFor() {
+        if (this.loading || !this.model) throw new Error("Wait for analysis to complete before summarizing layers.");
+        if (this.annotations.layers) return this.annotations.layers;
+        if (!this.generateLayerSummaries) throw new Error("Copilot layer summaries are unavailable in this provider.");
+        if (this.annotationPromises.has("layers")) return this.annotationPromises.get("layers");
+        const generation = this.reviewGeneration;
+        const model = this.model;
+        const promise = (async () => {
+            const navigation = workspaceNavigation(model, this.reviewSectionsFor());
+            const context = layerSummaryContext(model, navigation, this.annotations.overview?.body || null);
+            const intents = context.layers.length ? await this.generateLayerSummaries(context) : {};
+            if (generation !== this.reviewGeneration || this.model !== model) throw new Error("The review changed while summarizing layers.");
+            const annotation = { id: "annotation:layers", item_id: "layers", intents, generated_at: new Date().toISOString() };
+            this.annotations.layers = annotation;
+            this.saveCurrentReview();
+            this.broadcast("annotation");
+            return annotation;
+        })().finally(() => {
+            if (this.annotationPromises.get("layers") === promise) this.annotationPromises.delete("layers");
+        });
+        this.annotationPromises.set("layers", promise);
         return promise;
     }
 

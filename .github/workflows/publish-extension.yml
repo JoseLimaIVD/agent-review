@@ -81,7 +81,7 @@ jobs:
       - name: Check cross-platform session paths and attribution
         run: node --test .github/extensions/agent-review/tests/test-session-context.mjs
       - name: Check source navigation and snapshot caching
-        run: node --test .github/extensions/agent-review/tests/test-diff-context.mjs .github/extensions/agent-review/tests/test-source-performance.mjs .github/extensions/agent-review/tests/test-review-location.mjs .github/extensions/agent-review/tests/test-review-presentation.mjs .github/extensions/agent-review/tests/test-review-workspace.mjs
+        run: node --test .github/extensions/agent-review/tests/test-diff-context.mjs .github/extensions/agent-review/tests/test-source-performance.mjs .github/extensions/agent-review/tests/test-review-location.mjs .github/extensions/agent-review/tests/test-review-presentation.mjs .github/extensions/agent-review/tests/test-review-workspace.mjs .github/extensions/agent-review/tests/test-change-relations.mjs .github/extensions/agent-review/tests/test-layer-summaries.mjs
       - name: Build prepared extension
         run: node scripts/build-distribution.mjs "${{ runner.temp }}/agent-review-dist"
       - name: Verify bundled analyzers
