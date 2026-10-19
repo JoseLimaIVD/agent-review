@@ -1046,6 +1046,8 @@ main { padding: 16px 20px 32px; }
   cursor: pointer;
 }
 .review-next:hover { background: var(--cp-primary-hover); }
+.review-next.review-secondary { border-color: var(--cp-border); background: var(--cp-surface); color: var(--cp-text); }
+.review-next.review-secondary:hover { background: var(--pr-hover, var(--cp-surface-soft)); }
 .review-next:disabled { border-color: var(--cp-border); background: var(--cp-surface-soft); color: var(--cp-text-muted); cursor: default; }
 .review-plan-row {
   width: 100%;

@@ -1358,7 +1358,7 @@ function renderFinishReview() {
     const details = el("details", "");
     details.append(el("summary", "", "All file decisions"), list);
     panel.append(details);
-    const handoff = el("button", "review-next", "Preview / export handoff");
+    const handoff = el("button", next ? "review-next review-secondary" : "review-next", "Preview / export handoff");
     handoff.type = "button";
     handoff.disabled = !state.progressReady || state.progressSaving;
     handoff.addEventListener("click", () => openReviewHandoff());
