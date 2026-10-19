@@ -60,7 +60,8 @@ function planReasons(node, evidence, findings) {
     const churn = nodeChurn(node);
     if (evidence.untested) reasons.push(countLabel(evidence.untested, "untested path"));
     if (evidence.inferred) reasons.push(countLabel(evidence.inferred, "inferred path"));
-    if (callers) reasons.push(countLabel(callers, "caller"));
+    if (callers) reasons.push(node?.metrics?.transitive_callers
+        ? `${countLabel(callers, "caller")} incl. transitive` : countLabel(callers, "caller"));
     if (churn) reasons.push(countLabel(churn, "changed line"));
     for (const finding of findings) {
         if (finding.title && !reasons.includes(finding.title)) reasons.push(finding.title);

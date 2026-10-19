@@ -187,7 +187,7 @@ try {
         await page.locator("#summary .metric").filter({ hasText: "Packages" }).click();
         await page.locator(".stat-grid").waitFor();
         assert.match(await page.locator("#packages").textContent(), /Version 25\.0/);
-        assert.match(await page.locator("#attention .impact-score").first().textContent(), /Priority \d+\/100/);
+        assert.match(await page.locator("#attention .impact-score").first().textContent(), /Static impact \d+\/100/);
         const panel = await page.locator("#package-detail").textContent();
         assert.match(panel, /Manifest changes are reviewed even when no static usage is resolved/);
         assert.match(panel, /Static usage locations \(0\)/);

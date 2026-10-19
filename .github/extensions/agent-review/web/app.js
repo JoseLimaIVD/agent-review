@@ -1,5 +1,5 @@
 import { renderGraph, resizeGraph } from "/graph.js";
-import { findingsForNode, findingKey, isFindingClosed, orderFindings } from "/findings.mjs";
+import { findingsForNode, findingKey, groupFindings, isFindingClosed, orderFindings } from "/findings.mjs";
 import { resolveSymbolReference } from "/symbol-links.mjs";
 import { packageEvidenceLinks } from "/package-presentation.mjs";
 import { resolveSourceReference } from "/source-references.mjs";
@@ -287,8 +287,10 @@ function renderWorkspaceNavigation() {
     const location = state.source || state.workspaceReturn?.source;
     const group = groupForSource(navigation, location, state.activeReviewGroup);
     if (group) state.activeReviewGroup = group.id;
+    const changedFile = location && navigation.files.some((file) => file.path === location.path);
     elements.workspace_group_label.textContent = group?.title
-        || (state.source ? "Related source outside the changed-file groups" : "Choose a group or file");
+        || (changedFile ? "Changed file · this line is outside its grouped change ranges"
+            : state.source ? "Related source outside the changed-file groups" : "Choose a group or file");
     const query = state.navigationQuery.toLowerCase().trim();
     const key = `${state.payload.review_generation}:${state.sectionDataKey}:${state.navigationMode}:${query}`;
     elements.workspace_groups.setAttribute("aria-pressed", String(state.navigationMode === "groups"));
@@ -495,11 +497,13 @@ function renderReviewCommands() {
     if (!model) return;
     if (!commandCatalogs.has(model)) commandCatalogs.set(model, reviewCommands(model));
     const query = elements.review_command_query.value.trim().toLowerCase();
-    const matches = commandCatalogs.get(model).filter((item) =>
-        `${item.title} ${item.path || ""} ${item.reason || ""}`.toLowerCase().includes(query))
+    const matches = commandCatalogs.get(model).filter((item) => query
+        ? `${item.title} ${item.path || ""} ${item.reason || ""}`.toLowerCase().includes(query) : item.rank < 3)
         .sort((a, b) => Number(b.title.toLowerCase().startsWith(query)) - Number(a.title.toLowerCase().startsWith(query))
-            || a.title.localeCompare(b.title));
-    elements.review_command_count.textContent = `Showing ${Math.min(30, matches.length)} of ${matches.length} matching review items`;
+            || a.rank - b.rank || a.title.localeCompare(b.title));
+    elements.review_command_count.textContent = query
+        ? `Showing ${Math.min(30, matches.length)} of ${matches.length.toLocaleString()} matching review items · Enter opens the first`
+        : `Showing ${Math.min(30, matches.length)} of ${matches.length.toLocaleString()} concerns and changed items · type to search all symbols`;
     const rows = [];
     for (const item of matches.slice(0, 30)) {
         const row = el("li", "");
@@ -555,6 +559,11 @@ elements.review_command_palette.addEventListener("keydown", (event) => {
 });
 elements.review_command_query.addEventListener("input", renderReviewCommands);
 elements.review_command_query.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+        event.preventDefault();
+        elements.review_command_results.querySelector("button")?.click();
+        return;
+    }
     if (!["ArrowDown", "ArrowUp"].includes(event.key)) return;
     event.preventDefault();
     const buttons = [...elements.review_command_results.querySelectorAll("button")];
@@ -964,8 +973,8 @@ function renderCards(container, items, emptyText) {
         heading.append(el("strong", "", item.title || item.name || item.id));
         if (container === elements.attention) heading.append(el("span", "signal-label", signal.label));
         if (item.impact_score != null) {
-            const priority = el("b", "impact-score", `Priority ${item.impact_score}/100`);
-            priority.title = "Review priority based on change impact. This is not a vulnerability count or package security score.";
+            const priority = el("b", "impact-score", `Static impact ${item.impact_score}/100`);
+            priority.title = "Static change-impact score for this concern. The focused review queue's Priority also weighs churn, callers and test evidence. Not a vulnerability or package security score.";
             heading.append(priority);
         }
         card.append(heading, el("span", "card-body", conciseReviewText(item.id?.startsWith("package:") ? `${item.change} · Version ${packageVersionText(item)}` : item.body || item.reason || item.change || "")));
@@ -1590,6 +1599,14 @@ function renderImpact(model, focus = null) {
     expand.disabled = options.depth >= 4 || !slice.boundary;
     expand.addEventListener("click", () => { state.impact.depth++; renderImpact(model, "expand"); });
     controls.append(counts, direction, expand);
+    const seedNode = model.nodes.find((node) => node.id === options.seed);
+    const direct = seedNode?.metrics?.direct_callers || 0;
+    const callers = direct + (seedNode?.metrics?.transitive_callers || 0);
+    const drawnConsumers = slice.counts?.["Potential consumer"] || 0;
+    if (callers > drawnConsumers) {
+        controls.append(el("p", "muted", `Saved analysis records ${countLabel(callers, "caller")} of ${seedNode.name} (${direct.toLocaleString()} direct); this view draws ${
+            countLabel(drawnConsumers, "potential consumer")} at depth ${options.depth || 1}. Caller counts include every recorded call path; the view draws each consumer once and bounds its size.`));
+    }
     for (const gap of slice.gaps) controls.append(el("p", "muted", gap));
     const graph = el("div", "impact-graph");
     elements.graph.append(controls, graph);
@@ -1976,34 +1993,6 @@ function renderScopeFindings(model, parent, findings) {
         section.append(row);
     }
     elements.graph.prepend(section);
-}
-
-function groupFindings(items) {
-    const groups = new Map();
-    for (const item of items) {
-        const key = item.node_id ? `node:${item.node_id}` : item.edge_id ? `edge:${item.edge_id}` : item.id;
-        const existing = groups.get(key);
-        if (!existing) {
-            groups.set(key, { ...item, evidence_ids: [...(item.evidence_ids || [])], impact_factors: [...(item.impact_factors || [])], related_findings: [item.type] });
-            continue;
-        }
-        existing.evidence_ids = [...new Set([...existing.evidence_ids, ...(item.evidence_ids || [])])];
-        existing.impact_factors = [...new Set([...existing.impact_factors, ...(item.impact_factors || [])])];
-        existing.related_findings = [...new Set([...existing.related_findings, item.type])];
-        if ((item.impact_score || 0) > (existing.impact_score || 0)) {
-            existing.type = item.type;
-            existing.title = item.title;
-            existing.reason = item.reason;
-            existing.severity = item.severity;
-            existing.impact_score = item.impact_score;
-        }
-    }
-    return [...groups.values()].map((item) => {
-        if (item.related_findings.length > 1) {
-            item.reason = `${item.reason} Also flagged for ${item.related_findings.filter((type) => type !== item.type).join(", ").replaceAll("_", " ")}.`;
-        }
-        return item;
-    }).sort((a, b) => (b.impact_score || 0) - (a.impact_score || 0));
 }
 
 function resetToGraph() {

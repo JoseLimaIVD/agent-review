@@ -30,6 +30,12 @@ test("the command catalog exposes source symbols and changed files without prete
     const catalog = reviewCommands(model);
     assert.equal(catalog.length, 3);
     assert.equal(catalog.find((item) => item.id === "attention:one").path, "a.js");
+    const ranked = reviewCommands({ ...model, nodes: [...model.nodes,
+        { id: "vendor", name: "–", kind: "function", path: "vendor.min.js", change: "unchanged" },
+        { id: "helper", name: "helper", kind: "function", path: "b.js", change: "unchanged" }] });
+    assert.equal(ranked.some((item) => item.id === "vendor"), false, "nameless minified symbols are not listed");
+    assert.deepEqual(Object.fromEntries(ranked.map((item) => [item.id, item.rank])),
+        { "attention:one": 0, "file:a.js": 1, function: 2, helper: 3 });
     const evidence = reviewItemEvidence(model, model.attention[0]);
     assert.deepEqual(evidence.counts, { confirmed: 0, failing: 0, inferred: 0, unknown: 0 });
 });

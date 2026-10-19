@@ -394,8 +394,10 @@ export class ReviewState {
         const merged = new Map(Object.entries(current.entries));
         for (const [id, entry] of incoming) {
             const previous = merged.get(id);
-            if (previous && (previous.disposition !== entry.disposition || previous.note !== entry.note)) {
-                throw new Error(`Import conflicts with an existing decision for ${id}; nothing was overwritten.`);
+            // An explicit "Not reviewed" with no note carries no decision; treat it like an absent record.
+            const meaningful = previous && (previous.disposition !== "pending" || previous.note);
+            if (meaningful && (previous.disposition !== entry.disposition || previous.note !== entry.note)) {
+                throw new Error(`Import conflicts with an existing decision for ${previous.path || id.replace(/^review-file:/, "")}; nothing was overwritten.`);
             }
             merged.set(id, entry);
         }

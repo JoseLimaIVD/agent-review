@@ -35,6 +35,24 @@ test("handoff defaults contain decisions and evidence limits, never source, tran
     assert.throws(() => validateHandoffImport({ ...result.artifact, entries: undefined }, modelFor(), target), /must be an object/);
 });
 
+test("handoff lists every remaining file and the open concerns grouped the same way as Finish", () => {
+    const paths = Array.from({ length: 20 }, (_, index) => `src/file-${String(index).padStart(2, "0")}.js`);
+    const model = { ...modelFor(), changes: paths.map((path) => ({ path, status: "modified" })),
+        nodes: [{ id: "n1", name: "parse", path: "src/file-03.js", start_line: 12 }],
+        attention: [
+            { id: "a1", node_id: "n1", type: "complexity", title: "Complexity increased", impact_score: 84 },
+            { id: "a2", node_id: "n1", type: "callers", title: "Broad caller impact", impact_score: 100 },
+            { id: "a3", type: "package", title: "Package dependency added", impact_score: 40 },
+        ] };
+    const { markdown } = createReviewHandoff(model, target, { entries: {}, cursor: null });
+    assert.match(markdown, /<details><summary>20 files not yet reviewed<\/summary>/);
+    for (const path of paths) assert.ok(markdown.includes(path), `${path} is listed`);
+    assert.match(markdown, /## Open review priorities\n2 saved concerns/);
+    assert.match(markdown, /Broad caller impact · `` src\/file-03\.js:12 ``|Broad caller impact · ` src\/file-03\.js:12 `/);
+    assert.match(markdown, /static impact 100\/100/);
+    assert.match(markdown, /- 2 saved review concerns, not confirmed defects/);
+});
+
 test("portable identity ignores local clone paths but never accepts different saved content or unavailable binary worktrees", () => {
     const one = modelFor(), two = modelFor("D:\\another\\clone");
     assert.equal(handoffIdentity(one, target), handoffIdentity(two, target));
@@ -65,7 +83,7 @@ test("imports preview without mutation, retain current position, reject conflict
     assert.equal(saved.cursor.line, 2);
     const conflict = structuredClone(artifact);
     conflict.entries["review-file:a.js"].note = "Different note";
-    await assert.rejects(state.importHandoff({ artifact: conflict, revision: 1 }), /conflicts with an existing decision/);
+    await assert.rejects(state.importHandoff({ artifact: conflict, revision: 1 }), /conflicts with an existing decision for a\.js;/);
     await assert.rejects(state.importHandoff({ artifact, revision: 0, confirm: true }), /progress changed/);
     const invalid = { ...artifact, entries: { "review-file:missing.js": { ...entry, path: "missing.js" } } };
     await assert.rejects(state.importHandoff({ artifact: invalid, revision: 1 }), /must identify a changed file/);
@@ -86,6 +104,12 @@ test("imports preview without mutation, retain current position, reject conflict
     await assert.rejects(clone.importHandoff({ artifact, revision: 1 }), /does not match the loaded saved source/);
     assert.equal((await clone.progressForReview()).revision, 0, "newer source has a separate empty ledger");
     assert.equal((await state.progressForReview()).revision, 1);
+    const reset = await state.progressForReview();
+    await state.saveReviewProgress({ snapshot: reset.snapshot, revision: reset.revision, cursor: reset.cursor,
+        entries: { "review-file:a.js": { ...reset.entries["review-file:a.js"], disposition: "pending", note: "" } } });
+    const reimported = await state.importHandoff({ artifact, revision: reset.revision + 1, confirm: true });
+    assert.equal(reimported.entries["review-file:a.js"].disposition, entry.disposition,
+        "a reset Not reviewed record without a note does not block a teammate import");
     await state.dispose();
     await blank.dispose();
     await clone.dispose();

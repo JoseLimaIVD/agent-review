@@ -96,15 +96,20 @@ export function overviewBlurb(markdown) {
 export function reviewCommands(model) {
     const items = [];
     const nodes = new Map((model.nodes || []).map((node) => [node.id, node]));
-    for (const change of model.changes || []) if (change.status !== "unchanged") {
-        items.push({ id: `file:${change.path}`, kind: "file", title: change.path, path: change.path, label: "Changed file" });
-    }
-    for (const node of model.nodes || []) if (node.path && ["function", "method", "class", "interface"].includes(node.kind)) {
-        items.push({ ...node, title: node.display_name || node.name, label: `${node.kind} · ${node.change}` });
-    }
     for (const finding of model.attention || []) {
         const node = nodes.get(finding.node_id);
-        items.push({ ...finding, path: node?.path, title: finding.title, label: reviewSignal(finding).label });
+        const subject = node?.display_name || node?.name;
+        items.push({ ...finding, path: node?.path, title: subject ? `${finding.title}: ${subject}` : finding.title,
+            label: reviewSignal(finding).label, rank: 0 });
+    }
+    for (const change of model.changes || []) if (change.status !== "unchanged") {
+        items.push({ id: `file:${change.path}`, kind: "file", title: change.path, path: change.path, label: "Changed file", rank: 1 });
+    }
+    for (const node of model.nodes || []) if (node.path && ["function", "method", "class", "interface"].includes(node.kind)) {
+        const title = node.display_name || node.name;
+        // Minified or anonymous symbols have no searchable name.
+        if (!/[\p{L}\p{N}_$]/u.test(title || "")) continue;
+        items.push({ ...node, title, label: `${node.kind} · ${node.change}`, rank: node.change && node.change !== "unchanged" ? 2 : 3 });
     }
     return items;
 }
