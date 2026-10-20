@@ -8,6 +8,10 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ReviewState } from "../../review-state.mjs";
 import { startReviewServer } from "../../server.mjs";
+const openChangeSummary = async (page) => {
+    const details = page.locator("#review-background");
+    if (await details.isVisible() && !await details.evaluate((element) => element.open)) await details.locator(":scope > summary").click();
+};
 
 const require = createRequire(process.env.AGENT_REVIEW_BROWSER_PACKAGE || import.meta.url);
 const { chromium } = require("playwright-core");
@@ -110,6 +114,7 @@ try {
         const errors = [];
         page.on("pageerror", (error) => errors.push(error.message));
         await page.goto(`${server.url}?scoutTheme=${theme}`);
+        await openChangeSummary(page);
         await page.locator("#summary .metric").first().waitFor();
         await page.locator(".review-plan-row").first().waitFor();
         assert.match(await page.locator(".review-plan-row").first().textContent(), /resolveReference/);
@@ -150,6 +155,7 @@ try {
         }
         if (theme === "light") await page.locator("#zoom-out").click();
         else await page.getByRole("button", { name: "Architecture", exact: true }).click();
+        await openChangeSummary(page);
         await page.locator("#summary .metric").filter({ hasText: "Packages" }).click();
         for (const item of packages) {
             await page.locator("#packages .review-card").filter({ hasText: new RegExp(item.name) }).click();
@@ -194,6 +200,7 @@ try {
         await page.screenshot({ path: join(artifacts, `node-${theme}-packages-narrow.png`), fullPage: true });
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), true);
         await page.setViewportSize({ width: 1440, height: 1000 });
+        await openChangeSummary(page);
         await page.locator("#summary .metric").filter({ hasText: "Code paths" }).click();
         await page.locator(".decision-view .decision-row").first().waitFor();
         assert.match(await page.locator(".decision-view").textContent(), /resolveReference|describeReference/);

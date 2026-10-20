@@ -8,6 +8,10 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ReviewState } from "../../review-state.mjs";
 import { startReviewServer } from "../../server.mjs";
+const openChangeSummary = async (page) => {
+    const details = page.locator("#review-background");
+    if (await details.isVisible() && !await details.evaluate((element) => element.open)) await details.locator(":scope > summary").click();
+};
 
 const require = createRequire(process.env.AGENT_REVIEW_BROWSER_PACKAGE || import.meta.url);
 const { chromium } = require("playwright-core");
@@ -66,6 +70,7 @@ try {
         const errors = [];
         page.on("pageerror", (error) => errors.push(error.message));
         await page.goto(`${server.url}?scoutTheme=${theme}`);
+        await openChangeSummary(page);
         await page.locator("#summary .metric").first().waitFor();
         assert.match(await page.locator("#summary").getAttribute("title"), /Rust LOC/);
         assert.match(await page.locator("#overview-limitation").textContent(), /rust-coverage\.json/);
@@ -78,6 +83,7 @@ try {
             document.querySelector("#source-title")?.textContent || ""));
         assert.match(await page.locator("#source-decisions").textContent(), /Returns|Code path/i);
         await page.locator("#source-close").click();
+        await openChangeSummary(page);
         await page.locator("#summary .metric").filter({ hasText: "Packages" }).click();
         await page.locator(".package-row").filter({ hasText: "thiserror" }).click();
         assert.match(await page.locator("#package-detail").textContent(), /Cargo.*2\.0\.1/s);

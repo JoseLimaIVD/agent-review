@@ -9,6 +9,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ReviewState } from "../../review-state.mjs";
 import { startReviewServer } from "../../server.mjs";
+const openChangeSummary = async (page) => {
+    const details = page.locator("#review-background");
+    if (await details.isVisible() && !await details.evaluate((element) => element.open)) await details.locator(":scope > summary").click();
+};
+
 
 const require = createRequire(process.env.AGENT_REVIEW_BROWSER_PACKAGE || import.meta.url);
 const { chromium } = require("playwright-core");
@@ -102,6 +107,7 @@ try {
             assert.ok(scrolled.code > 0 && scrolled.side > 0, "both panes must genuinely scroll");
             if (width === 1280) assert.ok(scrolled.horizontal > 0);
             await page.click("#source-close");
+            await openChangeSummary(page);
             await page.locator("#summary .metric").filter({ hasText: "Files" }).click();
             for (const name of ["second", "first"]) {
                 await page.locator(".collection-row").filter({ hasText: `${name}.py` }).click();

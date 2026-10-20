@@ -9,6 +9,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ReviewState } from "../../review-state.mjs";
 import { startReviewServer } from "../../server.mjs";
+const openChangeSummary = async (page) => {
+    const details = page.locator("#review-background");
+    if (await details.isVisible() && !await details.evaluate((element) => element.open)) await details.locator(":scope > summary").click();
+};
 
 const require = createRequire(process.env.AGENT_REVIEW_BROWSER_PACKAGE || import.meta.url);
 const { chromium } = require("playwright-core");
@@ -105,6 +109,7 @@ try {
             assert.ok(colors.every((color) => color.actual === color.expected), `${theme}: ${selector} uses its semantic color`);
         }
         assert.match(await page.locator("#overview-limitation").textContent(), /Coverage unavailable.*Provide Python coverage\.json\/coverage\.xml/);
+        await openChangeSummary(page);
         const tiles = await page.locator("#summary .metric").evaluateAll((cards) => {
             const probe = document.createElement("span");
             probe.style.color = "var(--cp-text-muted)";
@@ -123,6 +128,7 @@ try {
             assert.equal(tile.empty, tile.zero, `${theme}: ${tile.label} is greyed exactly when it has no changes`);
             if (tile.empty) assert.ok(tile.mutedCounts, `${theme}: ${tile.label} counts are muted`);
         }
+        await openChangeSummary(page);
         assert.match(await page.locator("#summary .metric").filter({ hasText: "Architecture edges" }).textContent(),
             /\+0\/−0Architecture edgesNo module relationship changes/, "edge detail follows the module-level count");
         assert.match(await page.locator("#repository-identity").textContent(), /review-presentation-.*Base [a-f0-9]{8}/);
@@ -156,6 +162,7 @@ try {
             assert.ok(queueGeometry.length > 0, "fixture has review queue cards");
             assert.ok(queueGeometry.every((item) => item.fits && item.scrollWidth <= item.clientWidth + 1),
                 `${theme}: queue text and priorities fit at ${width}px: ${JSON.stringify(queueGeometry)}`);
+            await openChangeSummary(page);
             const metrics = await page.locator("#summary .metric").evaluateAll((cards) => {
                 cards[2].querySelector("small").textContent = "Largest: src.workflow_service.scheduling → croniter";
                 return cards.map((card) => ({
@@ -172,7 +179,9 @@ try {
                     }
                 }
             }
+            await openChangeSummary(page);
             assert.equal(await page.locator("#summary .metric").filter({ hasText: "Files" }).locator(".delta-modified").textContent(), "~1");
+            await openChangeSummary(page);
             assert.equal(await page.locator("#summary .metric").filter({ hasText: "Packages" }).locator(".delta-modified").textContent(), "~0");
         }
         await page.setViewportSize({ width: 1440, height: 1000 });
@@ -184,6 +193,7 @@ try {
         assert.equal(new Set(panels.map((panel) => panel.border)).size, 1, "summary panels use neutral Primer borders");
         assert.equal(new Set(panels.map((panel) => panel.background)).size, 1, "summary panels have neutral surfaces, not decorative tints");
         assert.equal(new Set(panels.map((panel) => panel.heading)).size, 3, "semantic color is limited to the section headings");
+        await openChangeSummary(page);
         await page.locator("#summary .metric").filter({ hasText: "Packages" }).click();
         await page.locator(".stat-grid").waitFor();
         assert.match(await page.locator("#packages").textContent(), /Version 25\.0/);
@@ -268,6 +278,7 @@ try {
         assert.equal(await page.locator(".workspace").evaluate((node) => node.classList.contains("package-mode")), false);
         assert.equal(await page.locator(".detail").isVisible(), false);
         assert.equal(await page.locator("#attention").isVisible(), true);
+        await openChangeSummary(page);
         await page.locator("#summary .metric").filter({ hasText: "Packages" }).click();
         await page.locator(".stat-grid").waitFor();
         assert.equal(explanations, 1, "saved package explanation is reused");
@@ -352,7 +363,9 @@ try {
     console.log("PASS saved commit autoload and all five grouped areas individually visible with source navigation");
     const linesPage = await browser.newPage();
     await linesPage.goto(server.url);
+    await openChangeSummary(linesPage);
     await linesPage.locator("#summary .metric").first().waitFor();
+    await openChangeSummary(linesPage);
     await linesPage.locator("#summary .metric").filter({ hasText: "Lines", exact: false }).filter({ hasNotText: "Files" }).first().click();
     assert.equal(await linesPage.locator("#graph-title").textContent(), "Lines changed by file");
     const fileRows = linesPage.locator("#graph .collection-row");
@@ -404,6 +417,7 @@ try {
     const emptyCommit = (await git("rev-parse", "HEAD")).stdout.trim();
     const emptyPage = await browser.newPage();
     await emptyPage.goto(server.url);
+    await openChangeSummary(emptyPage);
     await emptyPage.locator("#summary .metric").first().waitFor();
     const beforeEmpty = cleanSummaries;
     await emptyPage.selectOption("#review-mode", "commit");

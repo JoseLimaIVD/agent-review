@@ -2158,6 +2158,35 @@ body.reviewing #graph { flex: 1; min-height: 0; overflow: auto; }
 .coverage-key-uncovered::before { background: var(--cp-danger); }
 .code-row.coverage-covered > .line-number:nth-child(2) { box-shadow: inset -3px 0 0 var(--cp-success); }
 .code-row.coverage-uncovered > .line-number:nth-child(2) { box-shadow: inset -3px 0 0 var(--cp-danger); }
+/* Split diff: base on the left, current on the right. Each half is num + code at 50% width. */
+.diff-layout { display: inline-flex; margin-left: 8px; }
+.diff-layout.hidden { display: none; }
+.diff-layout button { min-height: 32px; padding: 5px 10px; border: 1px solid var(--cp-border); background: var(--cp-surface); color: var(--cp-text); cursor: pointer; }
+.diff-layout button:first-child { border-radius: 6px 0 0 6px; }
+.diff-layout button:last-child { border-left: 0; border-radius: 0 6px 6px 0; }
+.diff-layout button[aria-pressed="true"] { border-color: var(--cp-accent); background: var(--cp-accent-soft); color: var(--cp-accent); }
+.code-lines.split-diff { --split-num: calc(var(--source-line-digits, 4) * 1ch + 8px); width: 100%; }
+.code-lines.split-diff .code-row { grid-template-columns: var(--split-num) calc(50% - var(--split-num)) var(--split-num) calc(50% - var(--split-num)); }
+.code-lines.split-diff .code-row > code, .code-lines.split-diff .code-row.diff-context::after { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
+.code-lines.split-diff .code-row > .diff-prefix { display: none; }
+.code-lines.split-diff .code-row.diff-context > .line-number:first-child { grid-column: 1; grid-row: 1; }
+.code-lines.split-diff .code-row.diff-context > code { grid-column: 2; grid-row: 1; }
+.code-lines.split-diff .code-row.diff-context > .line-number:nth-child(2) { grid-column: 3; grid-row: 1; border-left: 1px solid var(--cp-border); }
+.code-lines.split-diff .code-row.diff-context::after { content: attr(data-mirror); grid-column: 4; grid-row: 1; padding: 1px 8px 1px 4px; font-family: inherit; }
+/* The mirrored context replaces the "Selected range" badge in split view; the outline still marks the range. */
+.code-lines.split-diff .code-row.diff-context.focus-line.focus-start::after { position: static; padding: 1px 8px 1px 4px; background: none; color: inherit;
+  font: inherit; text-transform: none; }
+.code-lines.split-diff .code-row:not(.diff-context):not(.split-pair > .code-row) > * { grid-column: 1 / -1; }
+.code-lines.split-diff .code-row:not(.diff-context):not(.split-pair > .code-row) > .line-number { display: none; }
+.split-pair { display: grid; grid-template-columns: 50% 50%; }
+.split-pair > .code-row, .split-pair > .split-filler { min-width: 0; }
+.code-lines.split-diff .split-pair > .code-row { grid-template-columns: var(--split-num) minmax(0, 1fr); }
+.split-pair > .code-row.diff-delete > .line-number:nth-child(2), .split-pair > .code-row.diff-add > .line-number:first-child { display: none; }
+.split-pair > .code-row > .line-number { grid-column: 1; }
+.split-pair > .code-row > code { grid-column: 2; }
+.split-pair > .code-row.diff-add { border-left: 1px solid var(--cp-border); }
+.split-filler { min-height: 20px; border-left: 1px solid var(--cp-border); background: repeating-linear-gradient(135deg, transparent 0 6px, color-mix(in srgb, var(--cp-border) 45%, transparent) 6px 7px); }
+.split-pair > .split-filler:first-child { border-left: 0; }
 body.reviewing .workspace.impact-mode #graph { display: flex; flex-direction: column; overflow: auto; }
 body.reviewing .workspace.impact-mode .impact-toolbar { flex: 0 0 auto; }
 body.reviewing .workspace.impact-mode .impact-graph { flex: 1 1 auto; min-height: 360px; overflow: hidden; }

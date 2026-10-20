@@ -9,6 +9,11 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { ReviewState } from "../../review-state.mjs";
 import { startReviewServer } from "../../server.mjs";
+const openChangeSummary = async (page) => {
+    const details = page.locator("#review-background");
+    if (await details.isVisible() && !await details.evaluate((element) => element.open)) await details.locator(":scope > summary").click();
+};
+
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const scratch = join(root, `.db-${randomUUID().slice(0, 8)}`);
@@ -172,6 +177,7 @@ public readonly struct Score
         const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
         page.on("pageerror", (error) => errors.push(`${theme}: ${error.stack || error.message}`));
         await page.goto(`${server.url}?scoutTheme=${theme}`);
+        await openChangeSummary(page);
         await page.locator("#summary .metric").first().waitFor();
         assert.match(await page.locator("body").textContent(), /ThresholdDemo|Raise C# acceptance/);
         await page.locator("#zoom-out").click();
@@ -212,6 +218,7 @@ public readonly struct Score
             }
             await capture(page, `dotnet-kinds-${theme}-${++kindsScreenshot}`);
         }
+        await openChangeSummary(page);
         await page.locator("#summary .metric").filter({ hasText: "Code paths" }).click();
         await page.locator(".decision-view .decision-group").first().waitFor();
         assert.match(await page.locator(".decision-view").textContent(), /95/);
@@ -257,6 +264,7 @@ public readonly struct Score
         await page.locator(".decision-view .decision-group").first().evaluate((element) => element.scrollIntoView({ block: "center" }));
         await capture(page, `dotnet-narrow-decisions-${theme}`, false);
         await page.setViewportSize({ width: 1440, height: 1000 });
+        await openChangeSummary(page);
         await page.locator("#summary .metric").filter({ hasText: "Packages" }).click();
         const packageRow = page.locator(".package-row").filter({ has: page.getByText("xunit", { exact: true }) });
         await packageRow.click();

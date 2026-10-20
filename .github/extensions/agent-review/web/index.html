@@ -197,6 +197,10 @@
                     <button class="tab active" data-tab="diff" type="button">Diff</button>
                     <button class="tab" data-tab="current" type="button">Current</button>
                     <button class="tab" data-tab="base" type="button">Base</button>
+                    <span id="diff-layout" class="diff-layout hidden" role="group" aria-label="Diff layout (U)">
+                        <button type="button" data-layout="unified" aria-pressed="true" title="Unified diff (U toggles)">Unified</button>
+                        <button type="button" data-layout="split" aria-pressed="false" title="Split diff: base left, current right (U toggles)">Split</button>
+                    </span>
                     <button id="source-close" class="source-close" type="button" aria-label="Close source review">Close ×</button>
                     <button id="source-impact" type="button">Impact</button>
                     <button id="source-section" type="button">Layer</button>
@@ -321,7 +325,7 @@
         <p id="review-command-count" class="muted" role="status"></p>
         <ul id="review-command-results" class="review-command-results"></ul>
         <p class="muted">Searches this snapshot's file names, symbols, and findings—not full source text. Results are capped at 30.</p>
-        <p class="muted">With review or source focus: J/K next/previous item, M mark the open file reviewed and go to the next, A ask, I impact, F focus code. Ctrl+K opens this finder outside editable fields. Escape exits focus mode, clears a highlighted range, or returns from source opened in Explore; use Close × to close a file in Review. Ctrl+Enter sends a discussion question.</p>
+        <p class="muted">With review or source focus: J/K next/previous item, M mark the open file reviewed and go to the next, U switch unified/split diff (wide windows), A ask, I impact, F focus code. Ctrl+K opens this finder outside editable fields. Escape exits focus mode, clears a highlighted range, or returns from source opened in Explore; use Close × to close a file in Review. Ctrl+Enter sends a discussion question.</p>
     </dialog>
     <dialog id="repository-picker" class="prompt-manager" aria-labelledby="repository-picker-title">
         <div class="custom-heading">

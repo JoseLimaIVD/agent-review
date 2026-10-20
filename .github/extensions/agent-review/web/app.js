@@ -57,7 +57,7 @@ const state = {
     fileReviewDrafts: new Map(),
 };
 const elements = Object.fromEntries([
-    "source-coverage", "source-position", "source-strip", "source-strip-toggle", "source-strip-body", "overview-layers", "overview-stats", "overview-limitation",
+    "source-coverage", "source-position", "diff-layout", "source-strip", "source-strip-toggle", "source-strip-body", "overview-layers", "overview-stats", "overview-limitation",
     "review-target-form", "review-mode", "review-ref", "review-target-label", "repository-identity", "review-list-refresh", "review-more", "review-options-status", "review-picker-notice", "clean-review", "change-brief",
     "review-overview", "review-background", "overview-title", "overview-description", "overview-progress", "overview-scope", "overview-start", "overview-files",
     "review-workflow", "workflow-overview", "workflow-review", "workflow-finish", "review-finish", "workspace-target", "workspace-freshness", "workspace-find", "workspace-nav-toggle",
@@ -643,8 +643,10 @@ function viewedSourceLocation() {
     const focusBox = focus?.getBoundingClientRect();
     const focused = focusBox && focusBox.bottom > Math.max(0, box.top)
         && focusBox.top < Math.min(innerHeight, box.bottom) ? focus : null;
-    const visible = document.elementFromPoint(Math.min(innerWidth - 8, box.left + 80),
-        Math.max(8, Math.min(innerHeight - 8, box.top + 12)))?.closest(".code-row");
+    const probe = document.elementFromPoint(Math.min(innerWidth - 8, box.left + 80),
+        Math.max(8, Math.min(innerHeight - 8, box.top + 12)))?.closest(".code-row, .split-pair");
+    // In split diffs the probe can land on an empty filler; use the line beside it.
+    const visible = probe?.classList.contains("split-pair") ? probe.querySelector(".code-row.diff-add, .code-row") : probe;
     const row = selected && elements.source.contains(selected) ? selected : focused || visible;
     if (!row && state.source.viewedLocationTab === state.sourceTab && state.source.viewedLocation) {
         return state.source.viewedLocation;
@@ -3929,6 +3931,8 @@ function codeRow(type, oldNumber, newNumber, prefix, content) {
     const row = el("div", `code-row diff-${type}`);
     if (oldNumber) row.dataset.oldLine = String(oldNumber);
     if (newNumber) row.dataset.newLine = String(newNumber);
+    // Split diffs show unchanged context on both sides; the right copy is presentational and mirrors this text.
+    if (splitRendering && type === "context") row.dataset.mirror = content;
     const coverage = newNumber ? coverageLines(state.source?.path)?.get(Number(newNumber)) : null;
     const current = el("span", "line-number", newNumber || "");
     if (coverage) {
@@ -3944,7 +3948,14 @@ function codeRow(type, oldNumber, newNumber, prefix, content) {
     return row;
 }
 
-function* diffRowIterator(text) {
+const SPLIT_DIFF_MIN_WIDTH = 1100;
+let splitRendering = false;
+let splitPairCounter = 0;
+const diffLayoutPreference = () => { try { return localStorage.getItem("agent-review.diff-layout") === "split" ? "split" : "unified"; } catch { return "unified"; } };
+// Split needs room for two columns of code; narrower windows always read unified.
+const splitDiffActive = (tab = state.sourceTab) => tab === "diff" && diffLayoutPreference() === "split" && innerWidth >= SPLIT_DIFF_MIN_WIDTH;
+
+function* diffRowIterator(text, split = false) {
     let oldLine = 0;
     let newLine = 0;
     const lines = String(text || "").split(/\r?\n/);
@@ -3976,11 +3987,22 @@ function* diffRowIterator(text) {
             while (lines[index]?.startsWith("-") && !lines[index].startsWith("---")) removed.push(lines[index++].slice(1));
             const added = [];
             while (lines[index]?.startsWith("+") && !lines[index].startsWith("+++")) added.push(lines[index++].slice(1));
+            if (split) {
+                // Pair each removed line with the added line in the same position so edits read side by side.
+                for (let pair = 0; pair < Math.max(removed.length, added.length); pair++) {
+                    const id = `p${++splitPairCounter}`;
+                    if (pair < removed.length) { const row = codeRow("delete", oldLine++, "", "−", removed[pair]); row.dataset.pair = id; yield row; }
+                    if (pair < added.length) { const row = codeRow("add", "", newLine++, "+", added[pair]); row.dataset.pair = id; yield row; }
+                }
+                continue;
+            }
             for (const content of removed) yield codeRow("delete", oldLine++, "", "−", content);
             for (const content of added) yield codeRow("add", "", newLine++, "+", content);
             continue;
         } else if (line.startsWith("+")) {
-            yield codeRow("add", "", newLine++, "+", line.slice(1));
+            const row = codeRow("add", "", newLine++, "+", line.slice(1));
+            if (split) row.dataset.pair = `p${++splitPairCounter}`;
+            yield row;
         } else if (line.startsWith(" ")) {
             yield codeRow("context", oldLine++, newLine++, " ", line.slice(1));
         } else if (line) {
@@ -4165,14 +4187,64 @@ function diffRowsWithGaps(source, rows) {
 const sourceRowCache = new Map();
 let sourceRenderVersion = 0;
 
+const rowCacheKey = (source, tab) => `${source.path}\0${tab}${splitDiffActive(tab) ? "\0split" : ""}`;
+
+// Wrap each paired removed/added line in one side-by-side unit; every line stays its own .code-row for selection,
+// citations and coverage. Unpaired sides get an empty filler so columns stay aligned.
+function splitDiffUnits(rows) {
+    const units = [];
+    for (let index = 0; index < rows.length; index++) {
+        const row = rows[index];
+        if (!row.dataset?.pair) { units.push(row); continue; }
+        const pair = el("div", "split-pair");
+        const next = rows[index + 1];
+        const partner = next?.dataset?.pair === row.dataset.pair ? next : null;
+        if (partner) index++;
+        const left = row.classList.contains("diff-delete") ? row : null;
+        const right = row.classList.contains("diff-add") ? row : partner;
+        pair.append(left || el("div", "split-filler"), right || el("div", "split-filler"));
+        units.push(pair);
+    }
+    return units;
+}
+
+function renderDiffLayoutControl() {
+    const control = elements.diff_layout;
+    const available = state.sourceTab === "diff" && innerWidth >= SPLIT_DIFF_MIN_WIDTH;
+    control.classList.toggle("hidden", !available);
+    const preference = diffLayoutPreference();
+    for (const button of control.querySelectorAll("button")) button.setAttribute("aria-pressed", String(button.dataset.layout === preference));
+}
+
+function setDiffLayout(layout) {
+    try { localStorage.setItem("agent-review.diff-layout", layout); } catch { /* the choice still applies to this view */ }
+    if (!state.source || state.sourceTab !== "diff") { renderDiffLayoutControl(); return; }
+    rememberReadingLine();
+    renderSource().then(restoreReadingLine).catch(showError);
+}
+
+// Switching layout keeps the reader on the same line instead of jumping to the top.
+function rememberReadingLine() {
+    const viewed = viewedSourceLocation();
+    state.layoutReadingLine = viewed ? { ...viewed } : null;
+}
+
+function restoreReadingLine() {
+    const viewed = state.layoutReadingLine;
+    state.layoutReadingLine = null;
+    if (!viewed) return;
+    const row = elements.source.querySelector(`.code-row[data-${viewed.side === "base" ? "old" : "new"}-line="${viewed.line}"]`);
+    if (row) elements.source.scrollTop += row.getBoundingClientRect().top - elements.source.getBoundingClientRect().top;
+}
+
 function matchingSourceRows(source, tab) {
-    const cached = sourceRowCache.get(`${source.path}\0${tab}`);
+    const cached = sourceRowCache.get(rowCacheKey(source, tab));
     return cached && cached.generation === state.payload?.review_generation && cached.diff === source.diff
         && cached.text === source[tab] && cached.current === source.current && cached.base === source.base ? cached : null;
 }
 
 async function cachedSourceRows(source, tab, isCurrent) {
-    const key = `${source.path}\0${tab}`;
+    const key = rowCacheKey(source, tab);
     const generation = state.payload?.review_generation;
     const cached = matchingSourceRows(source, tab);
     if (cached) {
@@ -4192,7 +4264,7 @@ async function cachedSourceRows(source, tab, isCurrent) {
         return cached;
     }
     const rows = [];
-    const iterator = tab === "diff" ? diffRowIterator(source.diff) : plainSourceRows(source[tab], tab);
+    const iterator = tab === "diff" ? diffRowIterator(source.diff, splitDiffActive(tab)) : plainSourceRows(source[tab], tab);
     let started = performance.now();
     for (const row of iterator) {
         rows.push(row);
@@ -4240,6 +4312,8 @@ async function renderSource({ preserveScroll = false } = {}) {
     elements.source_location.disabled = true;
     if (!matchingSourceRows(source, tab)) elements.source.replaceChildren(el("p", "muted", "Rendering saved source…"));
     elements.source_ruler.classList.add("hidden");
+    splitRendering = splitDiffActive(tab);
+    renderDiffLayoutControl();
     const cached = await cachedSourceRows(source, tab, isCurrent);
     if (!cached || !isCurrent()) return false;
     const reused = Boolean(cached.lines);
@@ -4288,16 +4362,18 @@ async function renderSource({ preserveScroll = false } = {}) {
     const largestLine = rows.reduce((largest, row) =>
         Math.max(largest, Number(row.dataset?.oldLine) || 0, Number(row.dataset?.newLine) || 0), 0);
     lines.style.setProperty("--source-line-digits", String(Math.max(2, String(largestLine).length)));
+    lines.classList.toggle("split-diff", splitRendering);
     if (!reused) {
-        if (rows.length > 2000) {
+        const units = splitRendering ? splitDiffUnits(rows) : rows;
+        if (units.length > 2000) {
             const fragment = document.createDocumentFragment();
-            for (let offset = 0; offset < rows.length; offset += 100) {
+            for (let offset = 0; offset < units.length; offset += 100) {
                 const chunk = el("div", "source-chunk");
-                chunk.append(...rows.slice(offset, offset + 100));
+                chunk.append(...units.slice(offset, offset + 100));
                 fragment.append(chunk);
             }
             lines.append(fragment);
-        } else lines.append(...(rows.length ? rows : [el("p", "empty-code", "(not present in this snapshot)")]));
+        } else lines.append(...(units.length ? units : [el("p", "empty-code", "(not present in this snapshot)")]));
         cached.lines = lines;
     }
     let focusStart = start;
@@ -6068,6 +6144,21 @@ async function reanalyze() {
     }
 }
 elements.refresh.addEventListener("click", reanalyze);
+for (const button of elements.diff_layout.querySelectorAll("button")) {
+    button.addEventListener("click", () => setDiffLayout(button.dataset.layout));
+}
+// Crossing the split threshold re-renders the diff in the layout that fits.
+{
+    let wide = innerWidth >= SPLIT_DIFF_MIN_WIDTH;
+    window.addEventListener("resize", () => {
+        const now = innerWidth >= SPLIT_DIFF_MIN_WIDTH;
+        if (now === wide) return;
+        wide = now;
+        if (state.source && state.sourceTab === "diff" && diffLayoutPreference() === "split"
+            && !elements.source_panel.classList.contains("hidden")) setDiffLayout("split");
+        else renderDiffLayoutControl();
+    });
+}
 elements.source_strip_toggle.addEventListener("click", () => {
     state.sourceStripOpen = !state.sourceStripOpen;
     renderSourceStrip();
@@ -6226,6 +6317,9 @@ window.addEventListener("keydown", (event) => {
     } else if (key === "f") {
         event.preventDefault();
         setSourceFocus(!state.sourceFocused);
+    } else if (key === "u" && state.source && state.sourceTab === "diff" && innerWidth >= SPLIT_DIFF_MIN_WIDTH) {
+        event.preventDefault();
+        setDiffLayout(diffLayoutPreference() === "split" ? "unified" : "split");
     } else if (key === "m" && state.reviewPage === "review" && !state.exploring && !elements.file_review_form.classList.contains("hidden")) {
         // Mark the open file and move on, without reaching for the footer (also works in focus mode).
         event.preventDefault();

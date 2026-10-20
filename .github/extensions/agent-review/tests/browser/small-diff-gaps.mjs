@@ -8,6 +8,11 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { ReviewState } from "../../review-state.mjs";
 import { startReviewServer } from "../../server.mjs";
+const openChangeSummary = async (page) => {
+    const details = page.locator("#review-background");
+    if (await details.isVisible() && !await details.evaluate((element) => element.open)) await details.locator(":scope > summary").click();
+};
+
 
 const { chromium } = createRequire(process.env.AGENT_REVIEW_BROWSER_PACKAGE || import.meta.url)("playwright-core");
 const execute = promisify(execFile);
@@ -42,6 +47,7 @@ try {
         const errors = [];
         page.on("pageerror", (error) => errors.push(error.message));
         await page.goto(`${server.url}?scoutTheme=${theme}`);
+        await openChangeSummary(page);
         await page.locator("#summary .metric").filter({ hasText: "Files" }).click();
         await page.locator(".collection-row").filter({ hasText: "gaps.py" }).click();
         await page.locator("#source .code-row").first().waitFor();

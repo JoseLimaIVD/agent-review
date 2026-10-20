@@ -9,6 +9,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ReviewState } from "../../review-state.mjs";
 import { startReviewServer } from "../../server.mjs";
+const openChangeSummary = async (page) => {
+    const details = page.locator("#review-background");
+    if (await details.isVisible() && !await details.evaluate((element) => element.open)) await details.locator(":scope > summary").click();
+};
+
 
 const require = createRequire(process.env.AGENT_REVIEW_BROWSER_PACKAGE || import.meta.url);
 const { chromium } = require("playwright-core");
@@ -94,6 +99,7 @@ try {
         assert.equal(await page.locator("#source .cited-start").count(), 2);
         await page.click("#source-close");
 
+        await openChangeSummary(page);
         await page.locator("#summary .metric").filter({ hasText: "Files" }).click();
         await page.locator(".collection-row").filter({ hasText: "worker.py" }).click();
         await page.waitForFunction(() => document.querySelector("#source-title").textContent === "worker.py");

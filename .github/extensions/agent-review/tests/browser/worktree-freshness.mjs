@@ -8,6 +8,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ReviewState } from "../../review-state.mjs";
 import { startReviewServer } from "../../server.mjs";
+const openChangeSummary = async (page) => {
+    const details = page.locator("#review-background");
+    if (await details.isVisible() && !await details.evaluate((element) => element.open)) await details.locator(":scope > summary").click();
+};
 
 const require = createRequire(process.env.AGENT_REVIEW_BROWSER_PACKAGE || import.meta.url);
 const { chromium } = require("playwright-core");
@@ -139,6 +143,7 @@ try {
         server = await startReviewServer(state);
         const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
         await page.goto(server.url);
+        await openChangeSummary(page);
         await page.locator("#summary .metric").first().waitFor();
         assert.equal(await page.locator("#worktree-notice").isVisible(), false);
         if (process.env.AGENT_REVIEW_SCREENSHOT_DIR) await page.screenshot({

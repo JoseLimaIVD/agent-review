@@ -5,6 +5,11 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { ReviewState } from "../../review-state.mjs";
 import { startReviewServer } from "../../server.mjs";
+const openChangeSummary = async (page) => {
+    const details = page.locator("#review-background");
+    if (await details.isVisible() && !await details.evaluate((element) => element.open)) await details.locator(":scope > summary").click();
+};
+
 
 const require = createRequire(process.env.AGENT_REVIEW_BROWSER_PACKAGE || import.meta.url);
 const { chromium } = require("playwright-core");
@@ -25,6 +30,7 @@ try {
         page.on("console", (event) => { if (event.type() === "error") errors.push(`${event.text()} ${event.location().url}`); });
         await page.route("**/favicon.ico", (route) => route.fulfill({ status: 204 }));
         await page.goto(server.url);
+        await openChangeSummary(page);
         await page.locator("#summary .metric").first().waitFor();
         const system = host === "light" ? "dark" : "light";
         assert.equal(await page.getAttribute("html", "data-theme"), system);

@@ -8,6 +8,10 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ReviewState } from "../../review-state.mjs";
 import { startReviewServer } from "../../server.mjs";
+const openChangeSummary = async (page) => {
+    const details = page.locator("#review-background");
+    if (await details.isVisible() && !await details.evaluate((element) => element.open)) await details.locator(":scope > summary").click();
+};
 
 const require = createRequire(process.env.AGENT_REVIEW_BROWSER_PACKAGE || import.meta.url);
 const { chromium } = require("playwright-core");
@@ -54,6 +58,7 @@ try {
         const errors = [];
         page.on("pageerror", (error) => errors.push(error.message));
         await page.goto(`${server.url}?scoutTheme=${theme}`);
+        await openChangeSummary(page);
         await page.locator("#summary .metric").first().waitFor();
         assert.match(await page.locator("#summary").getAttribute("title"), /Go LOC/);
         assert.match(await page.locator("#overview-limitation").textContent(), /Go coverprofile/);
@@ -70,6 +75,7 @@ try {
         await page.setViewportSize({ width: 560, height: 900 });
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), true);
         await page.screenshot({ path: join(artifacts, `go-${theme}-narrow.png`), fullPage: true });
+        await openChangeSummary(page);
         await page.locator("#summary .metric", { hasText: "Packages" }).click();
         const moduleRow = page.locator(".package-row", { hasText: "golang.org/x/text" });
         await moduleRow.click();

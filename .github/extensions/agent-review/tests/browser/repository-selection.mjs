@@ -7,6 +7,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ReviewState } from "../../review-state.mjs";
 import { startReviewServer } from "../../server.mjs";
+const openChangeSummary = async (page) => {
+    const details = page.locator("#review-background");
+    if (await details.isVisible() && !await details.evaluate((element) => element.open)) await details.locator(":scope > summary").click();
+};
+
 
 const require = createRequire(process.env.AGENT_REVIEW_BROWSER_PACKAGE || import.meta.url);
 const { chromium } = require("playwright-core");
@@ -52,9 +57,11 @@ try {
             && document.querySelector("#status").textContent === "Analysis current", demo, { timeout: 60000 });
         assert.equal(await page.locator("#repository-picker").isVisible(), false);
         assert.equal(await page.locator("#clean-review").isVisible(), false);
+        await openChangeSummary(page);
         assert.equal(await page.locator("#summary .metric").count(), 5);
         assert.equal(state.repoRoot, demo);
         assert.equal(state.model.summary.files_changed, 1);
+        await openChangeSummary(page);
         await page.locator("#summary .metric").filter({ hasText: "Files" }).click();
         await page.locator(".collection-row").filter({ hasText: "main.py" }).click();
         await page.waitForFunction(() => document.querySelector("#source-title").textContent === "main.py");

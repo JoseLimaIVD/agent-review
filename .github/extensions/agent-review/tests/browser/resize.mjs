@@ -8,6 +8,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ReviewState } from "../../review-state.mjs";
 import { startReviewServer } from "../../server.mjs";
+const openChangeSummary = async (page) => {
+    const details = page.locator("#review-background");
+    if (await details.isVisible() && !await details.evaluate((element) => element.open)) await details.locator(":scope > summary").click();
+};
+
 
 const require = createRequire(process.env.AGENT_REVIEW_BROWSER_PACKAGE || import.meta.url);
 const { chromium } = require("playwright-core");
@@ -199,6 +204,7 @@ try {
         await page.setViewportSize({ width: 600, height: 900 });
         await frames(page);
         assert.ok(await panelsUnchanged(page), "empty graphs and narrow layouts remain CSS-only");
+        await openChangeSummary(page);
         await page.locator("#summary .metric").filter({ hasText: "Files" }).click();
         await page.locator(".collection-row").filter({ hasText: "module0.py" }).click();
         await page.locator("#source .code-row").first().waitFor();
@@ -209,6 +215,7 @@ try {
         assert.ok(await panelsUnchanged(page), "collection resize does not rebuild its contents");
         assert.ok(await page.evaluate(() => resizeSource.isConnected), "resize does not replace source contents");
         await page.locator("#source-close").click();
+        await openChangeSummary(page);
         await page.locator("#summary .metric").filter({ hasText: "Architecture edges" }).click();
         await page.locator("#graph svg").waitFor();
         await rememberPanels(page);

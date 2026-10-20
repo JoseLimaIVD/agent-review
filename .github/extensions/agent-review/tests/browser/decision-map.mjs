@@ -9,6 +9,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ReviewState } from "../../review-state.mjs";
 import { startReviewServer } from "../../server.mjs";
+const openChangeSummary = async (page) => {
+    const details = page.locator("#review-background");
+    if (await details.isVisible() && !await details.evaluate((element) => element.open)) await details.locator(":scope > summary").click();
+};
+
 
 const require = createRequire(process.env.AGENT_REVIEW_BROWSER_PACKAGE || import.meta.url);
 const { chromium } = require("playwright-core");
@@ -130,6 +135,7 @@ try {
         const errors = [];
         page.on("pageerror", (error) => errors.push(error.message));
         await page.goto(`${server.url}?scoutTheme=${theme}`);
+        await openChangeSummary(page);
         const metric = page.locator("#summary .metric").filter({ hasText: "Code paths" });
         await metric.waitFor();
         await openChangeDetails(page);
@@ -181,6 +187,7 @@ try {
         await page.click("#source-close");
         const metricText = await metric.textContent();
         assert.match(metricText, /\+7\/~1\/−1Code paths3 callables · 8 without test evidence/, metricText);
+        await openChangeSummary(page);
         const rows = await page.locator("#summary .metric").evaluateAll((cards) => cards.map((card) => card.getBoundingClientRect().top));
         assert.equal(rows.length, 5);
         assert.ok(rows.every((top) => Math.abs(top - rows[0]) < 1), `${theme}: five summary metrics share one row at desktop width`);

@@ -8,6 +8,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ReviewState } from "../../review-state.mjs";
 import { startReviewServer } from "../../server.mjs";
+const openChangeSummary = async (page) => {
+    const details = page.locator("#review-background");
+    if (await details.isVisible() && !await details.evaluate((element) => element.open)) await details.locator(":scope > summary").click();
+};
+
 
 const require = createRequire(process.env.AGENT_REVIEW_BROWSER_PACKAGE || import.meta.url);
 const { chromium } = require("playwright-core");
@@ -81,6 +86,7 @@ try {
         assert.equal((await response).status(), 200);
         assert.equal(await page.locator("#review-ref").inputValue(), head);
         await page.waitForFunction(() => document.querySelector("#review-target-label").textContent.startsWith("Commit "));
+        await openChangeSummary(page);
         await page.locator("#summary .metric").filter({ hasText: "Files" }).click();
         await page.locator(".collection-row").filter({ hasText: "main.py" }).click();
         await page.waitForFunction(() => !document.querySelector("#source-panel").classList.contains("hidden"));
