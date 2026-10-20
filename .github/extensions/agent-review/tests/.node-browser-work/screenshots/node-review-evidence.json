@@ -1,0 +1,2775 @@
+{
+  "model": {
+    "aggregate_edges": [
+      {
+        "added_count": 0,
+        "count": 1,
+        "id": "node:aggregate_edge:0b8f2f680cba5e40",
+        "kind": "imports",
+        "language": "node",
+        "level": "module",
+        "removed_count": 0,
+        "source": "node:module:aa3f614bda78aaa2",
+        "target": "node:module:9a4ceebe7c6f8685",
+        "underlying_edge_ids": [
+          "node:edge:45fcadfe01b17ce6"
+        ]
+      },
+      {
+        "added_count": 0,
+        "count": 1,
+        "id": "node:aggregate_edge:0d98ed67d84944d4",
+        "kind": "calls",
+        "language": "node",
+        "level": "module",
+        "removed_count": 0,
+        "source": "node:module:9f2d7a3c30d31cdf",
+        "target": "node:module:4706ad89160b8642",
+        "underlying_edge_ids": [
+          "node:edge:69eedf488b6a6649"
+        ]
+      },
+      {
+        "added_count": 1,
+        "count": 1,
+        "id": "node:aggregate_edge:4d7b528e0b8475e6",
+        "kind": "calls",
+        "language": "node",
+        "level": "module",
+        "removed_count": 0,
+        "source": "node:module:411450fb73e231f6",
+        "target": "node:module:4706ad89160b8642",
+        "underlying_edge_ids": [
+          "node:edge:139c276fcf96e665"
+        ]
+      },
+      {
+        "added_count": 1,
+        "count": 1,
+        "id": "node:aggregate_edge:54ae3ed8f2b9399d",
+        "kind": "imports",
+        "language": "node",
+        "level": "module",
+        "removed_count": 0,
+        "source": "node:module:411450fb73e231f6",
+        "target": "node:module:4706ad89160b8642",
+        "underlying_edge_ids": [
+          "node:edge:c5937c700e424fb1"
+        ]
+      },
+      {
+        "added_count": 0,
+        "count": 1,
+        "id": "node:aggregate_edge:70ca7364fa25e0eb",
+        "kind": "calls",
+        "language": "node",
+        "level": "module",
+        "removed_count": 0,
+        "source": "node:module:69c84d9beec65e38",
+        "target": "node:module:4706ad89160b8642",
+        "underlying_edge_ids": [
+          "node:edge:6df450a9e6060cae"
+        ]
+      },
+      {
+        "added_count": 0,
+        "count": 1,
+        "id": "node:aggregate_edge:7eaf7e90f8a83843",
+        "kind": "imports",
+        "language": "node",
+        "level": "module",
+        "removed_count": 0,
+        "source": "node:module:9a4ceebe7c6f8685",
+        "target": "node:module:4706ad89160b8642",
+        "underlying_edge_ids": [
+          "node:edge:9892905e8707f15f"
+        ]
+      },
+      {
+        "added_count": 0,
+        "count": 1,
+        "id": "node:aggregate_edge:c824085656f8b010",
+        "kind": "calls",
+        "language": "node",
+        "level": "module",
+        "removed_count": 0,
+        "source": "node:module:aa3f614bda78aaa2",
+        "target": "node:module:9a4ceebe7c6f8685",
+        "underlying_edge_ids": [
+          "node:edge:5345441142041695"
+        ]
+      },
+      {
+        "added_count": 0,
+        "count": 1,
+        "id": "node:aggregate_edge:e7a1b14082df8b3f",
+        "kind": "imports",
+        "language": "node",
+        "level": "module",
+        "removed_count": 0,
+        "source": "node:module:69c84d9beec65e38",
+        "target": "node:module:4706ad89160b8642",
+        "underlying_edge_ids": [
+          "node:edge:948c5306ba4cb817"
+        ]
+      },
+      {
+        "added_count": 0,
+        "count": 1,
+        "id": "node:aggregate_edge:f43643fe474d1af1",
+        "kind": "imports",
+        "language": "node",
+        "level": "module",
+        "removed_count": 0,
+        "source": "node:module:9f2d7a3c30d31cdf",
+        "target": "node:module:4706ad89160b8642",
+        "underlying_edge_ids": [
+          "node:edge:1e6c4d6362911999"
+        ]
+      }
+    ],
+    "aggregates": {
+      "components": [
+        {
+          "id": "node:component:b28b1ed9821f38c6",
+          "language": "node",
+          "module_ids": [
+            "node:module:411450fb73e231f6",
+            "node:module:4706ad89160b8642",
+            "node:module:69c84d9beec65e38",
+            "node:module:9a4ceebe7c6f8685",
+            "node:module:9f2d7a3c30d31cdf",
+            "node:module:aa3f614bda78aaa2"
+          ],
+          "name": "packages"
+        }
+      ],
+      "edges": [
+        {
+          "added_count": 0,
+          "count": 1,
+          "id": "node:aggregate_edge:0b8f2f680cba5e40",
+          "kind": "imports",
+          "language": "node",
+          "level": "module",
+          "removed_count": 0,
+          "source": "node:module:aa3f614bda78aaa2",
+          "target": "node:module:9a4ceebe7c6f8685",
+          "underlying_edge_ids": [
+            "node:edge:45fcadfe01b17ce6"
+          ]
+        },
+        {
+          "added_count": 0,
+          "count": 1,
+          "id": "node:aggregate_edge:0d98ed67d84944d4",
+          "kind": "calls",
+          "language": "node",
+          "level": "module",
+          "removed_count": 0,
+          "source": "node:module:9f2d7a3c30d31cdf",
+          "target": "node:module:4706ad89160b8642",
+          "underlying_edge_ids": [
+            "node:edge:69eedf488b6a6649"
+          ]
+        },
+        {
+          "added_count": 1,
+          "count": 1,
+          "id": "node:aggregate_edge:4d7b528e0b8475e6",
+          "kind": "calls",
+          "language": "node",
+          "level": "module",
+          "removed_count": 0,
+          "source": "node:module:411450fb73e231f6",
+          "target": "node:module:4706ad89160b8642",
+          "underlying_edge_ids": [
+            "node:edge:139c276fcf96e665"
+          ]
+        },
+        {
+          "added_count": 1,
+          "count": 1,
+          "id": "node:aggregate_edge:54ae3ed8f2b9399d",
+          "kind": "imports",
+          "language": "node",
+          "level": "module",
+          "removed_count": 0,
+          "source": "node:module:411450fb73e231f6",
+          "target": "node:module:4706ad89160b8642",
+          "underlying_edge_ids": [
+            "node:edge:c5937c700e424fb1"
+          ]
+        },
+        {
+          "added_count": 0,
+          "count": 1,
+          "id": "node:aggregate_edge:70ca7364fa25e0eb",
+          "kind": "calls",
+          "language": "node",
+          "level": "module",
+          "removed_count": 0,
+          "source": "node:module:69c84d9beec65e38",
+          "target": "node:module:4706ad89160b8642",
+          "underlying_edge_ids": [
+            "node:edge:6df450a9e6060cae"
+          ]
+        },
+        {
+          "added_count": 0,
+          "count": 1,
+          "id": "node:aggregate_edge:7eaf7e90f8a83843",
+          "kind": "imports",
+          "language": "node",
+          "level": "module",
+          "removed_count": 0,
+          "source": "node:module:9a4ceebe7c6f8685",
+          "target": "node:module:4706ad89160b8642",
+          "underlying_edge_ids": [
+            "node:edge:9892905e8707f15f"
+          ]
+        },
+        {
+          "added_count": 0,
+          "count": 1,
+          "id": "node:aggregate_edge:c824085656f8b010",
+          "kind": "calls",
+          "language": "node",
+          "level": "module",
+          "removed_count": 0,
+          "source": "node:module:aa3f614bda78aaa2",
+          "target": "node:module:9a4ceebe7c6f8685",
+          "underlying_edge_ids": [
+            "node:edge:5345441142041695"
+          ]
+        },
+        {
+          "added_count": 0,
+          "count": 1,
+          "id": "node:aggregate_edge:e7a1b14082df8b3f",
+          "kind": "imports",
+          "language": "node",
+          "level": "module",
+          "removed_count": 0,
+          "source": "node:module:69c84d9beec65e38",
+          "target": "node:module:4706ad89160b8642",
+          "underlying_edge_ids": [
+            "node:edge:948c5306ba4cb817"
+          ]
+        },
+        {
+          "added_count": 0,
+          "count": 1,
+          "id": "node:aggregate_edge:f43643fe474d1af1",
+          "kind": "imports",
+          "language": "node",
+          "level": "module",
+          "removed_count": 0,
+          "source": "node:module:9f2d7a3c30d31cdf",
+          "target": "node:module:4706ad89160b8642",
+          "underlying_edge_ids": [
+            "node:edge:1e6c4d6362911999"
+          ]
+        }
+      ],
+      "modules": [
+        {
+          "ast_hash": "96aebba88f95d1ff07e85b7f5052412ecc40debd825c36c0cf3331b84429f8d7",
+          "change": "added",
+          "component": "packages",
+          "id": "node:module:411450fb73e231f6",
+          "language": "node",
+          "name": "packages/core/test/missing-title.test.mjs",
+          "path": "packages/core/test/missing-title.test.mjs",
+          "source_hash": "ae6d607d5f2e12a95ea42324536873a5263089d2cfea516ad1452c08054550f8",
+          "symbol_ids": []
+        },
+        {
+          "ast_hash": "3232b25c9f0b313b1121012cd0152dedef0edaf49dfd22eea1fdfb095e45997b",
+          "change": "modified",
+          "component": "packages",
+          "id": "node:module:4706ad89160b8642",
+          "language": "node",
+          "name": "packages/core/src/resolver.js",
+          "path": "packages/core/src/resolver.js",
+          "source_hash": "a4343369810ede6d810ffd3865feabb5458883f78ad9e0985b763b04d2f9fa30",
+          "symbol_ids": [
+            "node:symbol:87e25f40809b0b75"
+          ]
+        },
+        {
+          "ast_hash": "a04eb2c2ea43ccd9ca86075399dec35df4f2264d86b6547dfe721c7aa6dd24a8",
+          "change": "modified",
+          "component": "packages",
+          "id": "node:module:69c84d9beec65e38",
+          "language": "node",
+          "name": "packages/ui/src/StatusBadge.jsx",
+          "path": "packages/ui/src/StatusBadge.jsx",
+          "source_hash": "237bcdb07c96ae230882f728464b0a46f084c8c1d62826e571d1e8f77302e505",
+          "symbol_ids": [
+            "node:symbol:dc6103c30bfc03cf"
+          ]
+        },
+        {
+          "ast_hash": "cef124cd862d3d6a1ec101290cc821ed822e3dd0e8efdbe21fb4dae0c47c765b",
+          "change": "modified",
+          "component": "packages",
+          "id": "node:module:9a4ceebe7c6f8685",
+          "language": "node",
+          "name": "packages/core/src/index.ts",
+          "path": "packages/core/src/index.ts",
+          "source_hash": "2b7f4cf760e6c93ee5485fffa572133734805842263f30da4423aa7c13c68126",
+          "symbol_ids": [
+            "node:symbol:ff76eb2271626bd0"
+          ]
+        },
+        {
+          "ast_hash": "0d4e4a42d0ac9021ca5bb83e96481767ea0b5614f0aaff87ead810fe95903472",
+          "change": "modified",
+          "component": "packages",
+          "id": "node:module:9f2d7a3c30d31cdf",
+          "language": "node",
+          "name": "packages/core/test/resolver.test.mjs",
+          "path": "packages/core/test/resolver.test.mjs",
+          "source_hash": "ff53119be08d47ad8addab0f976fcb8ac39c5f96856c7569aae0515c7f6bcfb6",
+          "symbol_ids": []
+        },
+        {
+          "ast_hash": "a37375c93b8772c244cdd8c4d7f03a9f29b9bdea1d0333badd22a644d16d5709",
+          "change": "modified",
+          "component": "packages",
+          "id": "node:module:aa3f614bda78aaa2",
+          "language": "node",
+          "name": "packages/ui/src/ReferenceCard.tsx",
+          "path": "packages/ui/src/ReferenceCard.tsx",
+          "source_hash": "df0041d257955ed9c4f0312fcc2fe65afa85ec299d9a28f3ecb61e445b8b74f0",
+          "symbol_ids": [
+            "node:symbol:a482c355d5400b70"
+          ]
+        }
+      ]
+    },
+    "attention": [
+      {
+        "evidence_ids": [
+          "node:evidence:de9319bc0db18ab7"
+        ],
+        "id": "attention:283fbf027d63cb09",
+        "impact_factors": [
+          "dependency added",
+          "1 usage locations"
+        ],
+        "impact_score": 62,
+        "message": "Package dependency added",
+        "package_id": "package:npm:picocolors",
+        "reason": "picocolors is declared as picocolors ^1.1.1; 1 repository usage location resolved.",
+        "severity": "medium",
+        "title": "Package dependency added",
+        "type": "package"
+      },
+      {
+        "evidence_ids": [
+          "evidence:99e9e430955164b8"
+        ],
+        "id": "attention:104cbf1b029f9e91",
+        "impact_factors": [
+          "complexity +2",
+          "3 callers"
+        ],
+        "impact_score": 58,
+        "message": "Cyclomatic complexity increased",
+        "node_id": "node:symbol:87e25f40809b0b75",
+        "reason": "resolveReference increased from 1 to 3 and affects 3 callers.",
+        "severity": "medium",
+        "title": "Cyclomatic complexity increased",
+        "type": "complexity"
+      },
+      {
+        "evidence_ids": [
+          "evidence:3415279cd7fc1766"
+        ],
+        "id": "attention:e01cb6634a4f28e0",
+        "impact_factors": [
+          "complexity +1",
+          "1 callers"
+        ],
+        "impact_score": 51,
+        "message": "Cyclomatic complexity increased",
+        "node_id": "node:symbol:ff76eb2271626bd0",
+        "reason": "describeReference increased from 1 to 2 and affects 1 caller.",
+        "severity": "medium",
+        "title": "Cyclomatic complexity increased",
+        "type": "complexity"
+      },
+      {
+        "evidence_ids": [
+          "evidence:0b3eab3b2b808764"
+        ],
+        "id": "attention:9a9b405997eca2c8",
+        "impact_factors": [
+          "complexity +1",
+          "0 callers"
+        ],
+        "impact_score": 50,
+        "message": "Cyclomatic complexity increased",
+        "node_id": "node:symbol:dc6103c30bfc03cf",
+        "reason": "StatusBadge increased from 1 to 2 and affects 0 callers.",
+        "severity": "medium",
+        "title": "Cyclomatic complexity increased",
+        "type": "complexity"
+      },
+      {
+        "evidence_ids": [
+          "node:evidence:38e620906fb70750"
+        ],
+        "id": "attention:a1ead4db437fd2bb",
+        "impact_factors": [
+          "dependency modified",
+          "1 usage locations"
+        ],
+        "impact_score": 48,
+        "message": "Package dependency modified",
+        "package_id": "package:npm:lodash",
+        "reason": "lodash is declared as lodash ^4.17.21; 1 repository usage location resolved.",
+        "severity": "low",
+        "title": "Package dependency modified",
+        "type": "package"
+      },
+      {
+        "evidence_ids": [
+          "evidence:35830fd754874973"
+        ],
+        "id": "attention:f30f09b00aed2fd9",
+        "impact_factors": [
+          "3 callers",
+          "6 changed lines"
+        ],
+        "impact_score": 44,
+        "message": "Change has broad caller impact",
+        "node_id": "node:symbol:87e25f40809b0b75",
+        "reason": "resolveReference is reached by 3 direct or transitive callers.",
+        "severity": "low",
+        "title": "Change has broad caller impact",
+        "type": "broad_impact"
+      }
+    ],
+    "changes": [
+      {
+        "added_lines": [],
+        "baseline_lines": 3,
+        "baseline_size": 33,
+        "current_lines": 3,
+        "current_size": 33,
+        "lines_added": 0,
+        "lines_removed": 0,
+        "path": ".gitignore",
+        "removed_lines": [],
+        "status": "unchanged"
+      },
+      {
+        "added_lines": [
+          6,
+          9,
+          10
+        ],
+        "baseline_lines": 13,
+        "baseline_size": 670,
+        "current_lines": 14,
+        "current_size": 826,
+        "lines_added": 3,
+        "lines_removed": 2,
+        "path": "package-lock.json",
+        "removed_lines": [
+          6,
+          9
+        ],
+        "status": "modified"
+      },
+      {
+        "added_lines": [
+          7
+        ],
+        "baseline_lines": 8,
+        "baseline_size": 226,
+        "current_lines": 8,
+        "current_size": 250,
+        "lines_added": 1,
+        "lines_removed": 1,
+        "path": "package.json",
+        "removed_lines": [
+          7
+        ],
+        "status": "modified"
+      },
+      {
+        "added_lines": [],
+        "baseline_lines": 6,
+        "baseline_size": 106,
+        "current_lines": 6,
+        "current_size": 106,
+        "lines_added": 0,
+        "lines_removed": 0,
+        "path": "packages/core/package.json",
+        "removed_lines": [],
+        "status": "unchanged"
+      },
+      {
+        "added_lines": [
+          4,
+          5,
+          6,
+          7
+        ],
+        "baseline_lines": 5,
+        "baseline_size": 133,
+        "current_lines": 8,
+        "current_size": 203,
+        "lines_added": 4,
+        "lines_removed": 1,
+        "path": "packages/core/src/index.ts",
+        "removed_lines": [
+          4
+        ],
+        "status": "modified"
+      },
+      {
+        "added_lines": [
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "baseline_lines": 3,
+        "baseline_size": 84,
+        "current_lines": 9,
+        "current_size": 225,
+        "lines_added": 6,
+        "lines_removed": 0,
+        "path": "packages/core/src/resolver.js",
+        "removed_lines": [],
+        "status": "modified"
+      },
+      {
+        "added_lines": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "baseline_lines": 0,
+        "baseline_size": null,
+        "current_lines": 7,
+        "current_size": 236,
+        "lines_added": 7,
+        "lines_removed": 0,
+        "path": "packages/core/test/missing-title.test.mjs",
+        "removed_lines": [],
+        "status": "added"
+      },
+      {
+        "added_lines": [
+          3,
+          5,
+          6,
+          7,
+          8
+        ],
+        "baseline_lines": 7,
+        "baseline_size": 250,
+        "current_lines": 12,
+        "current_size": 442,
+        "lines_added": 5,
+        "lines_removed": 0,
+        "path": "packages/core/test/resolver.test.mjs",
+        "removed_lines": [],
+        "status": "modified"
+      },
+      {
+        "added_lines": [],
+        "baseline_lines": 6,
+        "baseline_size": 118,
+        "current_lines": 6,
+        "current_size": 118,
+        "lines_added": 0,
+        "lines_removed": 0,
+        "path": "packages/ui/package.json",
+        "removed_lines": [],
+        "status": "unchanged"
+      },
+      {
+        "added_lines": [
+          2,
+          5,
+          6
+        ],
+        "baseline_lines": 5,
+        "baseline_size": 174,
+        "current_lines": 7,
+        "current_size": 292,
+        "lines_added": 3,
+        "lines_removed": 1,
+        "path": "packages/ui/src/ReferenceCard.tsx",
+        "removed_lines": [
+          4
+        ],
+        "status": "modified"
+      },
+      {
+        "added_lines": [
+          2,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10
+        ],
+        "baseline_lines": 3,
+        "baseline_size": 157,
+        "current_lines": 10,
+        "current_size": 307,
+        "lines_added": 8,
+        "lines_removed": 1,
+        "path": "packages/ui/src/StatusBadge.jsx",
+        "removed_lines": [
+          3
+        ],
+        "status": "modified"
+      },
+      {
+        "added_lines": [],
+        "baseline_lines": 12,
+        "baseline_size": 282,
+        "current_lines": 12,
+        "current_size": 282,
+        "lines_added": 0,
+        "lines_removed": 0,
+        "path": "tsconfig.json",
+        "removed_lines": [],
+        "status": "unchanged"
+      }
+    ],
+    "churn": [
+      {
+        "additions": 3,
+        "commits": 1,
+        "deletions": 0,
+        "path": ".gitignore"
+      },
+      {
+        "additions": 13,
+        "commits": 1,
+        "deletions": 0,
+        "path": "package-lock.json"
+      },
+      {
+        "additions": 8,
+        "commits": 1,
+        "deletions": 0,
+        "path": "package.json"
+      },
+      {
+        "additions": 6,
+        "commits": 1,
+        "deletions": 0,
+        "path": "packages/core/package.json"
+      },
+      {
+        "additions": 5,
+        "commits": 1,
+        "deletions": 0,
+        "path": "packages/core/src/index.ts"
+      },
+      {
+        "additions": 3,
+        "commits": 1,
+        "deletions": 0,
+        "path": "packages/core/src/resolver.js"
+      },
+      {
+        "additions": 7,
+        "commits": 1,
+        "deletions": 0,
+        "path": "packages/core/test/resolver.test.mjs"
+      },
+      {
+        "additions": 6,
+        "commits": 1,
+        "deletions": 0,
+        "path": "packages/ui/package.json"
+      },
+      {
+        "additions": 5,
+        "commits": 1,
+        "deletions": 0,
+        "path": "packages/ui/src/ReferenceCard.tsx"
+      },
+      {
+        "additions": 3,
+        "commits": 1,
+        "deletions": 0,
+        "path": "packages/ui/src/StatusBadge.jsx"
+      },
+      {
+        "additions": 12,
+        "commits": 1,
+        "deletions": 0,
+        "path": "tsconfig.json"
+      }
+    ],
+    "codeboarding": {
+      "available": false,
+      "components": []
+    },
+    "coverage": {
+      "available": false,
+      "changed_lines": {},
+      "files": []
+    },
+    "edges": [
+      {
+        "change": "added",
+        "confidence": "resolved",
+        "count": 1,
+        "evidence_ids": [
+          "node:evidence:098e4b63e4a2a658"
+        ],
+        "id": "node:edge:139c276fcf96e665",
+        "source": "node:module:411450fb73e231f6",
+        "target": "node:symbol:87e25f40809b0b75",
+        "type": "calls"
+      },
+      {
+        "change": "unchanged",
+        "confidence": "resolved",
+        "count": 1,
+        "evidence_ids": [
+          "node:evidence:52d319f3769db851"
+        ],
+        "id": "node:edge:1e6c4d6362911999",
+        "source": "node:module:9f2d7a3c30d31cdf",
+        "target": "node:module:4706ad89160b8642",
+        "type": "imports"
+      },
+      {
+        "change": "added",
+        "confidence": "likely",
+        "count": 1,
+        "evidence_ids": [
+          "node:evidence:de9319bc0db18ab7"
+        ],
+        "id": "node:edge:1fd7be33b21b6c57",
+        "source": "node:module:69c84d9beec65e38",
+        "target": "package:npm:picocolors",
+        "type": "uses_package"
+      },
+      {
+        "change": "unchanged",
+        "confidence": "resolved",
+        "count": 1,
+        "evidence_ids": [
+          "node:evidence:b621085c764b5191"
+        ],
+        "id": "node:edge:45fcadfe01b17ce6",
+        "source": "node:module:aa3f614bda78aaa2",
+        "target": "node:module:9a4ceebe7c6f8685",
+        "type": "imports"
+      },
+      {
+        "change": "unchanged",
+        "confidence": "resolved",
+        "count": 1,
+        "evidence_ids": [
+          "node:evidence:d762ced61ba36bb2"
+        ],
+        "id": "node:edge:5345441142041695",
+        "source": "node:symbol:a482c355d5400b70",
+        "target": "node:symbol:ff76eb2271626bd0",
+        "type": "calls"
+      },
+      {
+        "change": "unchanged",
+        "confidence": "resolved",
+        "count": 1,
+        "evidence_ids": [
+          "node:evidence:5389ee9fe7bba0bc"
+        ],
+        "id": "node:edge:69eedf488b6a6649",
+        "source": "node:module:9f2d7a3c30d31cdf",
+        "target": "node:symbol:87e25f40809b0b75",
+        "type": "calls"
+      },
+      {
+        "change": "unchanged",
+        "confidence": "resolved",
+        "count": 1,
+        "evidence_ids": [
+          "node:evidence:4a8bd01e4b7f1eef"
+        ],
+        "id": "node:edge:6df450a9e6060cae",
+        "source": "node:symbol:dc6103c30bfc03cf",
+        "target": "node:symbol:87e25f40809b0b75",
+        "type": "calls"
+      },
+      {
+        "change": "added",
+        "confidence": "likely",
+        "count": 1,
+        "evidence_ids": [
+          "node:evidence:38e620906fb70750"
+        ],
+        "id": "node:edge:9354b32673d6c381",
+        "source": "node:module:aa3f614bda78aaa2",
+        "target": "package:npm:lodash",
+        "type": "uses_package"
+      },
+      {
+        "change": "unchanged",
+        "confidence": "resolved",
+        "count": 1,
+        "evidence_ids": [
+          "node:evidence:6fc1fdf0c9885031"
+        ],
+        "id": "node:edge:948c5306ba4cb817",
+        "source": "node:module:69c84d9beec65e38",
+        "target": "node:module:4706ad89160b8642",
+        "type": "imports"
+      },
+      {
+        "change": "unchanged",
+        "confidence": "resolved",
+        "count": 1,
+        "evidence_ids": [
+          "node:evidence:a97a2525858781db"
+        ],
+        "id": "node:edge:9892905e8707f15f",
+        "source": "node:module:9a4ceebe7c6f8685",
+        "target": "node:module:4706ad89160b8642",
+        "type": "imports"
+      },
+      {
+        "change": "added",
+        "confidence": "resolved",
+        "count": 1,
+        "evidence_ids": [
+          "node:evidence:d5892dfb44eab7c2"
+        ],
+        "id": "node:edge:c5937c700e424fb1",
+        "source": "node:module:411450fb73e231f6",
+        "target": "node:module:4706ad89160b8642",
+        "type": "imports"
+      }
+    ],
+    "evidence": {
+      "evidence:0b3eab3b2b808764": {
+        "detail": "1 -> 2",
+        "kind": "complexity",
+        "line": 4,
+        "path": "packages/ui/src/StatusBadge.jsx"
+      },
+      "evidence:3415279cd7fc1766": {
+        "detail": "1 -> 2",
+        "kind": "complexity",
+        "line": 3,
+        "path": "packages/core/src/index.ts"
+      },
+      "evidence:35830fd754874973": {
+        "detail": "3 direct/transitive callers",
+        "kind": "broad_impact",
+        "line": 1,
+        "path": "packages/core/src/resolver.js"
+      },
+      "evidence:99e9e430955164b8": {
+        "detail": "1 -> 3",
+        "kind": "complexity",
+        "line": 1,
+        "path": "packages/core/src/resolver.js"
+      },
+      "node:evidence:098e4b63e4a2a658": {
+        "detail": "resolveReference",
+        "end_line": 6,
+        "kind": "calls",
+        "language": "node",
+        "line": 6,
+        "path": "packages/core/test/missing-title.test.mjs",
+        "snapshot": "current",
+        "source": "node:module:411450fb73e231f6",
+        "start_column": 15,
+        "target": "node:symbol:87e25f40809b0b75"
+      },
+      "node:evidence:38e620906fb70750": {
+        "detail": "lodash/uniq.js",
+        "end_line": 2,
+        "kind": "uses_package",
+        "language": "node",
+        "line": 2,
+        "path": "packages/ui/src/ReferenceCard.tsx",
+        "snapshot": "current",
+        "source": "node:module:aa3f614bda78aaa2",
+        "start_column": 0,
+        "target": "package:npm:lodash"
+      },
+      "node:evidence:4a8bd01e4b7f1eef": {
+        "detail": "resolveReference",
+        "end_line": 5,
+        "kind": "calls",
+        "language": "node",
+        "line": 5,
+        "path": "packages/ui/src/StatusBadge.jsx",
+        "snapshot": "current",
+        "source": "node:symbol:dc6103c30bfc03cf",
+        "start_column": 16,
+        "target": "node:symbol:87e25f40809b0b75"
+      },
+      "node:evidence:52d319f3769db851": {
+        "detail": "../src/resolver.js",
+        "end_line": 4,
+        "kind": "imports",
+        "language": "node",
+        "line": 4,
+        "path": "packages/core/test/resolver.test.mjs",
+        "snapshot": "current",
+        "source": "node:module:9f2d7a3c30d31cdf",
+        "start_column": 0,
+        "target": "node:module:4706ad89160b8642"
+      },
+      "node:evidence:5389ee9fe7bba0bc": {
+        "detail": "resolveReference",
+        "end_line": 11,
+        "kind": "calls",
+        "language": "node",
+        "line": 11,
+        "path": "packages/core/test/resolver.test.mjs",
+        "snapshot": "current",
+        "source": "node:module:9f2d7a3c30d31cdf",
+        "start_column": 15,
+        "target": "node:symbol:87e25f40809b0b75"
+      },
+      "node:evidence:6fc1fdf0c9885031": {
+        "detail": "../../core/src/resolver.js",
+        "end_line": 1,
+        "kind": "imports",
+        "language": "node",
+        "line": 1,
+        "path": "packages/ui/src/StatusBadge.jsx",
+        "snapshot": "current",
+        "source": "node:module:69c84d9beec65e38",
+        "start_column": 0,
+        "target": "node:module:4706ad89160b8642"
+      },
+      "node:evidence:a97a2525858781db": {
+        "detail": "./resolver.js",
+        "end_line": 1,
+        "kind": "imports",
+        "language": "node",
+        "line": 1,
+        "path": "packages/core/src/index.ts",
+        "snapshot": "current",
+        "source": "node:module:9a4ceebe7c6f8685",
+        "start_column": 0,
+        "target": "node:module:4706ad89160b8642"
+      },
+      "node:evidence:b621085c764b5191": {
+        "detail": "@demo/core",
+        "end_line": 1,
+        "kind": "imports",
+        "language": "node",
+        "line": 1,
+        "path": "packages/ui/src/ReferenceCard.tsx",
+        "snapshot": "current",
+        "source": "node:module:aa3f614bda78aaa2",
+        "start_column": 0,
+        "target": "node:module:9a4ceebe7c6f8685"
+      },
+      "node:evidence:d5892dfb44eab7c2": {
+        "detail": "../src/resolver.js",
+        "end_line": 3,
+        "kind": "imports",
+        "language": "node",
+        "line": 3,
+        "path": "packages/core/test/missing-title.test.mjs",
+        "snapshot": "current",
+        "source": "node:module:411450fb73e231f6",
+        "start_column": 0,
+        "target": "node:module:4706ad89160b8642"
+      },
+      "node:evidence:d762ced61ba36bb2": {
+        "detail": "describeReference",
+        "end_line": 5,
+        "kind": "calls",
+        "language": "node",
+        "line": 5,
+        "path": "packages/ui/src/ReferenceCard.tsx",
+        "snapshot": "current",
+        "source": "node:symbol:a482c355d5400b70",
+        "start_column": 23,
+        "target": "node:symbol:ff76eb2271626bd0"
+      },
+      "node:evidence:de9319bc0db18ab7": {
+        "detail": "picocolors",
+        "end_line": 2,
+        "kind": "uses_package",
+        "language": "node",
+        "line": 2,
+        "path": "packages/ui/src/StatusBadge.jsx",
+        "snapshot": "current",
+        "source": "node:module:69c84d9beec65e38",
+        "start_column": 0,
+        "target": "package:npm:picocolors"
+      }
+    },
+    "metadata": {
+      "base_ref": "HEAD",
+      "base_sha": "5b5816f3c40bb51ff86de5c14f59e16857d043c5",
+      "generated_at": "2026-10-19T20:54:56-07:00",
+      "head_sha": "5b5816f3c40bb51ff86de5c14f59e16857d043c5",
+      "node_loc": 53,
+      "python_loc": 0,
+      "repo_root": "C:\\Source\\AgentReview\\.github\\extensions\\agent-review\\tests\\.node-browser-work\\review-BT7qYa\\repo",
+      "review_languages": [
+        "node"
+      ],
+      "schema_version": 1
+    },
+    "nodes": [
+      {
+        "change": "modified",
+        "component_id": "node:component:b28b1ed9821f38c6",
+        "end_line": null,
+        "id": "node:component:b28b1ed9821f38c6",
+        "kind": "component",
+        "language": "node",
+        "metrics": {
+          "changed_lines_coverage_percent": null,
+          "changed_lines_covered": 0,
+          "changed_lines_total": 0,
+          "changed_lines_uncovered": 0,
+          "churn_additions_90d": 0,
+          "churn_commits_90d": 0,
+          "churn_deletions_90d": 0,
+          "complexity_base": null,
+          "complexity_current": null,
+          "coverage_percent": null,
+          "direct_callers": 0,
+          "lines_added": 33,
+          "lines_changed": 36,
+          "lines_removed": 3,
+          "signature_base": null,
+          "signature_current": null,
+          "transitive_callers": 0
+        },
+        "module_id": null,
+        "name": "packages",
+        "parent_id": null,
+        "path": null,
+        "signatures": {
+          "base": null,
+          "current": null
+        },
+        "start_line": null,
+        "type": "component"
+      },
+      {
+        "change": "added",
+        "component_id": "node:component:b28b1ed9821f38c6",
+        "end_line": 7,
+        "id": "node:module:411450fb73e231f6",
+        "kind": "module",
+        "language": "node",
+        "metrics": {
+          "changed_lines_coverage_percent": null,
+          "changed_lines_covered": 0,
+          "changed_lines_total": 0,
+          "changed_lines_uncovered": 0,
+          "churn_additions_90d": 0,
+          "churn_commits_90d": 0,
+          "churn_deletions_90d": 0,
+          "complexity_base": null,
+          "complexity_current": null,
+          "coverage_percent": null,
+          "direct_callers": 0,
+          "lines_added": 7,
+          "lines_changed": 7,
+          "lines_removed": 0,
+          "signature_base": null,
+          "signature_current": null,
+          "transitive_callers": 0
+        },
+        "module_id": "node:module:411450fb73e231f6",
+        "name": "packages/core/test/missing-title.test.mjs",
+        "parent_id": "node:component:b28b1ed9821f38c6",
+        "path": "packages/core/test/missing-title.test.mjs",
+        "signatures": {
+          "base": null,
+          "current": null
+        },
+        "start_line": 1,
+        "type": "module"
+      },
+      {
+        "change": "modified",
+        "component_id": "node:component:b28b1ed9821f38c6",
+        "end_line": 9,
+        "id": "node:module:4706ad89160b8642",
+        "kind": "module",
+        "language": "node",
+        "metrics": {
+          "changed_lines_coverage_percent": null,
+          "changed_lines_covered": 0,
+          "changed_lines_total": 0,
+          "changed_lines_uncovered": 0,
+          "churn_additions_90d": 3,
+          "churn_commits_90d": 1,
+          "churn_deletions_90d": 0,
+          "complexity_base": null,
+          "complexity_current": null,
+          "coverage_percent": null,
+          "direct_callers": 0,
+          "lines_added": 6,
+          "lines_changed": 6,
+          "lines_removed": 0,
+          "signature_base": null,
+          "signature_current": null,
+          "transitive_callers": 0
+        },
+        "module_id": "node:module:4706ad89160b8642",
+        "name": "packages/core/src/resolver.js",
+        "parent_id": "node:component:b28b1ed9821f38c6",
+        "path": "packages/core/src/resolver.js",
+        "signatures": {
+          "base": null,
+          "current": null
+        },
+        "start_line": 1,
+        "type": "module"
+      },
+      {
+        "change": "modified",
+        "component_id": "node:component:b28b1ed9821f38c6",
+        "end_line": 10,
+        "id": "node:module:69c84d9beec65e38",
+        "kind": "module",
+        "language": "node",
+        "metrics": {
+          "changed_lines_coverage_percent": null,
+          "changed_lines_covered": 0,
+          "changed_lines_total": 0,
+          "changed_lines_uncovered": 0,
+          "churn_additions_90d": 3,
+          "churn_commits_90d": 1,
+          "churn_deletions_90d": 0,
+          "complexity_base": null,
+          "complexity_current": null,
+          "coverage_percent": null,
+          "direct_callers": 0,
+          "lines_added": 8,
+          "lines_changed": 9,
+          "lines_removed": 1,
+          "signature_base": null,
+          "signature_current": null,
+          "transitive_callers": 0
+        },
+        "module_id": "node:module:69c84d9beec65e38",
+        "name": "packages/ui/src/StatusBadge.jsx",
+        "parent_id": "node:component:b28b1ed9821f38c6",
+        "path": "packages/ui/src/StatusBadge.jsx",
+        "signatures": {
+          "base": null,
+          "current": null
+        },
+        "start_line": 1,
+        "type": "module"
+      },
+      {
+        "change": "modified",
+        "component_id": "node:component:b28b1ed9821f38c6",
+        "end_line": 8,
+        "id": "node:module:9a4ceebe7c6f8685",
+        "kind": "module",
+        "language": "node",
+        "metrics": {
+          "changed_lines_coverage_percent": null,
+          "changed_lines_covered": 0,
+          "changed_lines_total": 0,
+          "changed_lines_uncovered": 0,
+          "churn_additions_90d": 5,
+          "churn_commits_90d": 1,
+          "churn_deletions_90d": 0,
+          "complexity_base": null,
+          "complexity_current": null,
+          "coverage_percent": null,
+          "direct_callers": 0,
+          "lines_added": 4,
+          "lines_changed": 5,
+          "lines_removed": 1,
+          "signature_base": null,
+          "signature_current": null,
+          "transitive_callers": 0
+        },
+        "module_id": "node:module:9a4ceebe7c6f8685",
+        "name": "packages/core/src/index.ts",
+        "parent_id": "node:component:b28b1ed9821f38c6",
+        "path": "packages/core/src/index.ts",
+        "signatures": {
+          "base": null,
+          "current": null
+        },
+        "start_line": 1,
+        "type": "module"
+      },
+      {
+        "change": "modified",
+        "component_id": "node:component:b28b1ed9821f38c6",
+        "end_line": 12,
+        "id": "node:module:9f2d7a3c30d31cdf",
+        "kind": "module",
+        "language": "node",
+        "metrics": {
+          "changed_lines_coverage_percent": null,
+          "changed_lines_covered": 0,
+          "changed_lines_total": 0,
+          "changed_lines_uncovered": 0,
+          "churn_additions_90d": 7,
+          "churn_commits_90d": 1,
+          "churn_deletions_90d": 0,
+          "complexity_base": null,
+          "complexity_current": null,
+          "coverage_percent": null,
+          "direct_callers": 0,
+          "lines_added": 5,
+          "lines_changed": 5,
+          "lines_removed": 0,
+          "signature_base": null,
+          "signature_current": null,
+          "transitive_callers": 0
+        },
+        "module_id": "node:module:9f2d7a3c30d31cdf",
+        "name": "packages/core/test/resolver.test.mjs",
+        "parent_id": "node:component:b28b1ed9821f38c6",
+        "path": "packages/core/test/resolver.test.mjs",
+        "signatures": {
+          "base": null,
+          "current": null
+        },
+        "start_line": 1,
+        "type": "module"
+      },
+      {
+        "change": "modified",
+        "component_id": "node:component:b28b1ed9821f38c6",
+        "end_line": 7,
+        "id": "node:module:aa3f614bda78aaa2",
+        "kind": "module",
+        "language": "node",
+        "metrics": {
+          "changed_lines_coverage_percent": null,
+          "changed_lines_covered": 0,
+          "changed_lines_total": 0,
+          "changed_lines_uncovered": 0,
+          "churn_additions_90d": 5,
+          "churn_commits_90d": 1,
+          "churn_deletions_90d": 0,
+          "complexity_base": null,
+          "complexity_current": null,
+          "coverage_percent": null,
+          "direct_callers": 0,
+          "lines_added": 3,
+          "lines_changed": 4,
+          "lines_removed": 1,
+          "signature_base": null,
+          "signature_current": null,
+          "transitive_callers": 0
+        },
+        "module_id": "node:module:aa3f614bda78aaa2",
+        "name": "packages/ui/src/ReferenceCard.tsx",
+        "parent_id": "node:component:b28b1ed9821f38c6",
+        "path": "packages/ui/src/ReferenceCard.tsx",
+        "signatures": {
+          "base": null,
+          "current": null
+        },
+        "start_line": 1,
+        "type": "module"
+      },
+      {
+        "change": "modified",
+        "component_id": "node:component:b28b1ed9821f38c6",
+        "display_name": "resolveReference",
+        "end_line": 9,
+        "fields": [],
+        "id": "node:symbol:87e25f40809b0b75",
+        "kind": "function",
+        "language": "node",
+        "metrics": {
+          "changed_lines_coverage_percent": null,
+          "changed_lines_covered": 0,
+          "changed_lines_total": 0,
+          "changed_lines_uncovered": 0,
+          "churn_additions_90d": 3,
+          "churn_commits_90d": 1,
+          "churn_deletions_90d": 0,
+          "complexity_base": 1,
+          "complexity_current": 3,
+          "coverage_percent": null,
+          "direct_callers": 3,
+          "lines_added": 6,
+          "lines_changed": 6,
+          "lines_removed": 0,
+          "signature_base": "(reference)",
+          "signature_current": "(reference)",
+          "transitive_callers": 0
+        },
+        "module_id": "node:module:4706ad89160b8642",
+        "name": "resolveReference",
+        "parent_id": "node:module:4706ad89160b8642",
+        "path": "packages/core/src/resolver.js",
+        "qualified_name": "packages/core/src/resolver.js.resolveReference",
+        "signatures": {
+          "base": "(reference)",
+          "current": "(reference)"
+        },
+        "start_line": 1,
+        "type": "function"
+      },
+      {
+        "change": "modified",
+        "component_id": "node:component:b28b1ed9821f38c6",
+        "display_name": "ReferenceCard",
+        "end_line": 7,
+        "fields": [],
+        "id": "node:symbol:a482c355d5400b70",
+        "kind": "function",
+        "language": "node",
+        "metrics": {
+          "changed_lines_coverage_percent": null,
+          "changed_lines_covered": 0,
+          "changed_lines_total": 0,
+          "changed_lines_uncovered": 0,
+          "churn_additions_90d": 5,
+          "churn_commits_90d": 1,
+          "churn_deletions_90d": 0,
+          "complexity_base": 1,
+          "complexity_current": 1,
+          "coverage_percent": null,
+          "direct_callers": 0,
+          "lines_added": 2,
+          "lines_changed": 3,
+          "lines_removed": 1,
+          "signature_base": "({ title }: { title: string })",
+          "signature_current": "({ title }: { title: string })",
+          "transitive_callers": 0
+        },
+        "module_id": "node:module:aa3f614bda78aaa2",
+        "name": "ReferenceCard",
+        "parent_id": "node:module:aa3f614bda78aaa2",
+        "path": "packages/ui/src/ReferenceCard.tsx",
+        "qualified_name": "packages/ui/src/ReferenceCard.tsx.ReferenceCard",
+        "signatures": {
+          "base": "({ title }: { title: string })",
+          "current": "({ title }: { title: string })"
+        },
+        "start_line": 4,
+        "type": "function"
+      },
+      {
+        "change": "modified",
+        "component_id": "node:component:b28b1ed9821f38c6",
+        "display_name": "StatusBadge",
+        "end_line": 10,
+        "fields": [],
+        "id": "node:symbol:dc6103c30bfc03cf",
+        "kind": "function",
+        "language": "node",
+        "metrics": {
+          "changed_lines_coverage_percent": null,
+          "changed_lines_covered": 0,
+          "changed_lines_total": 0,
+          "changed_lines_uncovered": 0,
+          "churn_additions_90d": 3,
+          "churn_commits_90d": 1,
+          "churn_deletions_90d": 0,
+          "complexity_base": 1,
+          "complexity_current": 2,
+          "coverage_percent": null,
+          "direct_callers": 0,
+          "lines_added": 7,
+          "lines_changed": 7,
+          "lines_removed": 0,
+          "signature_base": "({ reference })",
+          "signature_current": "({ reference })",
+          "transitive_callers": 0
+        },
+        "module_id": "node:module:69c84d9beec65e38",
+        "name": "StatusBadge",
+        "parent_id": "node:module:69c84d9beec65e38",
+        "path": "packages/ui/src/StatusBadge.jsx",
+        "qualified_name": "packages/ui/src/StatusBadge.jsx.StatusBadge",
+        "signatures": {
+          "base": "({ reference })",
+          "current": "({ reference })"
+        },
+        "start_line": 4,
+        "type": "function"
+      },
+      {
+        "change": "modified",
+        "component_id": "node:component:b28b1ed9821f38c6",
+        "display_name": "describeReference",
+        "end_line": 8,
+        "fields": [],
+        "id": "node:symbol:ff76eb2271626bd0",
+        "kind": "function",
+        "language": "node",
+        "metrics": {
+          "changed_lines_coverage_percent": null,
+          "changed_lines_covered": 0,
+          "changed_lines_total": 0,
+          "changed_lines_uncovered": 0,
+          "churn_additions_90d": 5,
+          "churn_commits_90d": 1,
+          "churn_deletions_90d": 0,
+          "complexity_base": 1,
+          "complexity_current": 2,
+          "coverage_percent": null,
+          "direct_callers": 1,
+          "lines_added": 4,
+          "lines_changed": 5,
+          "lines_removed": 1,
+          "signature_base": "(title: string): string",
+          "signature_current": "(title: string): string",
+          "transitive_callers": 0
+        },
+        "module_id": "node:module:9a4ceebe7c6f8685",
+        "name": "describeReference",
+        "parent_id": "node:module:9a4ceebe7c6f8685",
+        "path": "packages/core/src/index.ts",
+        "qualified_name": "packages/core/src/index.ts.describeReference",
+        "signatures": {
+          "base": "(title: string): string",
+          "current": "(title: string): string"
+        },
+        "start_line": 3,
+        "type": "function"
+      },
+      {
+        "change": "unchanged",
+        "component_id": null,
+        "ecosystem": "npm",
+        "end_line": null,
+        "id": "package:npm:@demo/core",
+        "kind": "package",
+        "metrics": {
+          "changed_lines_coverage_percent": null,
+          "changed_lines_covered": 0,
+          "changed_lines_total": 0,
+          "changed_lines_uncovered": 0,
+          "churn_additions_90d": 0,
+          "churn_commits_90d": 0,
+          "churn_deletions_90d": 0,
+          "complexity_base": null,
+          "complexity_current": null,
+          "coverage_percent": null,
+          "direct_callers": 0,
+          "lines_added": 0,
+          "lines_changed": 0,
+          "lines_removed": 0,
+          "signature_base": null,
+          "signature_current": null,
+          "transitive_callers": 0
+        },
+        "module_id": null,
+        "name": "@demo/core",
+        "parent_id": null,
+        "path": null,
+        "signatures": {
+          "base": null,
+          "current": null
+        },
+        "start_line": null,
+        "type": "package"
+      },
+      {
+        "change": "modified",
+        "component_id": null,
+        "ecosystem": "npm",
+        "end_line": null,
+        "id": "package:npm:lodash",
+        "kind": "package",
+        "metrics": {
+          "changed_lines_coverage_percent": null,
+          "changed_lines_covered": 0,
+          "changed_lines_total": 0,
+          "changed_lines_uncovered": 0,
+          "churn_additions_90d": 0,
+          "churn_commits_90d": 0,
+          "churn_deletions_90d": 0,
+          "complexity_base": null,
+          "complexity_current": null,
+          "coverage_percent": null,
+          "direct_callers": 0,
+          "lines_added": 0,
+          "lines_changed": 0,
+          "lines_removed": 0,
+          "signature_base": null,
+          "signature_current": null,
+          "transitive_callers": 0
+        },
+        "module_id": null,
+        "name": "lodash",
+        "parent_id": null,
+        "path": null,
+        "signatures": {
+          "base": null,
+          "current": null
+        },
+        "start_line": null,
+        "type": "package"
+      },
+      {
+        "change": "added",
+        "component_id": null,
+        "ecosystem": "npm",
+        "end_line": null,
+        "id": "package:npm:picocolors",
+        "kind": "package",
+        "metrics": {
+          "changed_lines_coverage_percent": null,
+          "changed_lines_covered": 0,
+          "changed_lines_total": 0,
+          "changed_lines_uncovered": 0,
+          "churn_additions_90d": 0,
+          "churn_commits_90d": 0,
+          "churn_deletions_90d": 0,
+          "complexity_base": null,
+          "complexity_current": null,
+          "coverage_percent": null,
+          "direct_callers": 0,
+          "lines_added": 0,
+          "lines_changed": 0,
+          "lines_removed": 0,
+          "signature_base": null,
+          "signature_current": null,
+          "transitive_callers": 0
+        },
+        "module_id": null,
+        "name": "picocolors",
+        "parent_id": null,
+        "path": null,
+        "signatures": {
+          "base": null,
+          "current": null
+        },
+        "start_line": null,
+        "type": "package"
+      }
+    ],
+    "package_changes": [
+      {
+        "change": "modified",
+        "declared_base": [
+          {
+            "declaration_column_end": 27,
+            "declaration_column_start": 21,
+            "declaration_end_line": 7,
+            "declaration_line": 7,
+            "ecosystem": "npm",
+            "end_column": 27,
+            "end_line": 7,
+            "group": "runtime",
+            "id": "package:npm:lodash",
+            "import_name": "lodash",
+            "line": 7,
+            "name": "lodash",
+            "resolution_source": "package-lock.json",
+            "resolved_version": "4.17.20",
+            "source": "package.json",
+            "specifier": "^4.17.20",
+            "start_column": 21
+          }
+        ],
+        "declared_baseline": [
+          {
+            "declaration_column_end": 27,
+            "declaration_column_start": 21,
+            "declaration_end_line": 7,
+            "declaration_line": 7,
+            "ecosystem": "npm",
+            "end_column": 27,
+            "end_line": 7,
+            "group": "runtime",
+            "id": "package:npm:lodash",
+            "import_name": "lodash",
+            "line": 7,
+            "name": "lodash",
+            "resolution_source": "package-lock.json",
+            "resolved_version": "4.17.20",
+            "source": "package.json",
+            "specifier": "^4.17.20",
+            "start_column": 21
+          }
+        ],
+        "declared_current": [
+          {
+            "declaration_column_end": 27,
+            "declaration_column_start": 21,
+            "declaration_end_line": 7,
+            "declaration_line": 7,
+            "ecosystem": "npm",
+            "end_column": 27,
+            "end_line": 7,
+            "group": "runtime",
+            "id": "package:npm:lodash",
+            "import_name": "lodash",
+            "line": 7,
+            "name": "lodash",
+            "resolution_source": "package-lock.json",
+            "resolved_version": "4.17.21",
+            "source": "package.json",
+            "specifier": "^4.17.21",
+            "start_column": 21,
+            "used_by": [
+              "packages/ui/src/ReferenceCard.tsx:2"
+            ]
+          }
+        ],
+        "ecosystem": "npm",
+        "evidence_ids": [
+          "node:evidence:38e620906fb70750"
+        ],
+        "id": "package:npm:lodash",
+        "name": "lodash",
+        "resolved_current": "4.17.21",
+        "usage_locations": [
+          "packages/ui/src/ReferenceCard.tsx:2"
+        ]
+      },
+      {
+        "change": "added",
+        "declared_base": [],
+        "declared_baseline": [],
+        "declared_current": [
+          {
+            "declaration_column_end": 53,
+            "declaration_column_start": 43,
+            "declaration_end_line": 7,
+            "declaration_line": 7,
+            "ecosystem": "npm",
+            "end_column": 53,
+            "end_line": 7,
+            "group": "runtime",
+            "id": "package:npm:picocolors",
+            "import_name": "picocolors",
+            "line": 7,
+            "name": "picocolors",
+            "resolution_source": "package-lock.json",
+            "resolved_version": "1.1.1",
+            "source": "package.json",
+            "specifier": "^1.1.1",
+            "start_column": 43,
+            "used_by": [
+              "packages/ui/src/StatusBadge.jsx:2"
+            ]
+          }
+        ],
+        "ecosystem": "npm",
+        "evidence_ids": [
+          "node:evidence:de9319bc0db18ab7"
+        ],
+        "id": "package:npm:picocolors",
+        "name": "picocolors",
+        "resolved_current": "1.1.1",
+        "usage_locations": [
+          "packages/ui/src/StatusBadge.jsx:2"
+        ]
+      }
+    ],
+    "package_dependencies": [
+      {
+        "change": "unchanged",
+        "declared_baseline": [
+          {
+            "declaration_column_end": 31,
+            "declaration_column_start": 21,
+            "declaration_end_line": 5,
+            "declaration_line": 5,
+            "ecosystem": "npm",
+            "end_column": 31,
+            "end_line": 5,
+            "group": "runtime",
+            "id": "package:npm:@demo/core",
+            "import_name": "@demo/core",
+            "line": 5,
+            "local": true,
+            "name": "@demo/core",
+            "resolution_source": "package-lock.json",
+            "resolved_version": "1.0.0",
+            "source": "packages/ui/package.json",
+            "specifier": "1.0.0",
+            "start_column": 21,
+            "workspace": true,
+            "workspace_link": true
+          }
+        ],
+        "declared_current": [
+          {
+            "declaration_column_end": 31,
+            "declaration_column_start": 21,
+            "declaration_end_line": 5,
+            "declaration_line": 5,
+            "ecosystem": "npm",
+            "end_column": 31,
+            "end_line": 5,
+            "group": "runtime",
+            "id": "package:npm:@demo/core",
+            "import_name": "@demo/core",
+            "line": 5,
+            "local": true,
+            "name": "@demo/core",
+            "resolution_source": "package-lock.json",
+            "resolved_version": "1.0.0",
+            "source": "packages/ui/package.json",
+            "specifier": "1.0.0",
+            "start_column": 21,
+            "used_by": [],
+            "workspace": true,
+            "workspace_link": true
+          }
+        ],
+        "ecosystem": "npm",
+        "evidence_ids": [],
+        "id": "package:npm:@demo/core",
+        "name": "@demo/core",
+        "resolved_current": "1.0.0",
+        "usage_locations": []
+      },
+      {
+        "change": "modified",
+        "declared_baseline": [
+          {
+            "declaration_column_end": 27,
+            "declaration_column_start": 21,
+            "declaration_end_line": 7,
+            "declaration_line": 7,
+            "ecosystem": "npm",
+            "end_column": 27,
+            "end_line": 7,
+            "group": "runtime",
+            "id": "package:npm:lodash",
+            "import_name": "lodash",
+            "line": 7,
+            "name": "lodash",
+            "resolution_source": "package-lock.json",
+            "resolved_version": "4.17.20",
+            "source": "package.json",
+            "specifier": "^4.17.20",
+            "start_column": 21
+          }
+        ],
+        "declared_current": [
+          {
+            "declaration_column_end": 27,
+            "declaration_column_start": 21,
+            "declaration_end_line": 7,
+            "declaration_line": 7,
+            "ecosystem": "npm",
+            "end_column": 27,
+            "end_line": 7,
+            "group": "runtime",
+            "id": "package:npm:lodash",
+            "import_name": "lodash",
+            "line": 7,
+            "name": "lodash",
+            "resolution_source": "package-lock.json",
+            "resolved_version": "4.17.21",
+            "source": "package.json",
+            "specifier": "^4.17.21",
+            "start_column": 21,
+            "used_by": [
+              "packages/ui/src/ReferenceCard.tsx:2"
+            ]
+          }
+        ],
+        "ecosystem": "npm",
+        "evidence_ids": [
+          "node:evidence:38e620906fb70750"
+        ],
+        "id": "package:npm:lodash",
+        "name": "lodash",
+        "resolved_current": "4.17.21",
+        "usage_locations": [
+          "packages/ui/src/ReferenceCard.tsx:2"
+        ]
+      },
+      {
+        "change": "added",
+        "declared_baseline": [],
+        "declared_current": [
+          {
+            "declaration_column_end": 53,
+            "declaration_column_start": 43,
+            "declaration_end_line": 7,
+            "declaration_line": 7,
+            "ecosystem": "npm",
+            "end_column": 53,
+            "end_line": 7,
+            "group": "runtime",
+            "id": "package:npm:picocolors",
+            "import_name": "picocolors",
+            "line": 7,
+            "name": "picocolors",
+            "resolution_source": "package-lock.json",
+            "resolved_version": "1.1.1",
+            "source": "package.json",
+            "specifier": "^1.1.1",
+            "start_column": 43,
+            "used_by": [
+              "packages/ui/src/StatusBadge.jsx:2"
+            ]
+          }
+        ],
+        "ecosystem": "npm",
+        "evidence_ids": [
+          "node:evidence:de9319bc0db18ab7"
+        ],
+        "id": "package:npm:picocolors",
+        "name": "picocolors",
+        "resolved_current": "1.1.1",
+        "usage_locations": [
+          "packages/ui/src/StatusBadge.jsx:2"
+        ]
+      }
+    ],
+    "packages": {
+      "baseline": [
+        {
+          "declaration_column_end": 31,
+          "declaration_column_start": 21,
+          "declaration_end_line": 5,
+          "declaration_line": 5,
+          "ecosystem": "npm",
+          "end_column": 31,
+          "end_line": 5,
+          "group": "runtime",
+          "id": "package:npm:@demo/core",
+          "import_name": "@demo/core",
+          "line": 5,
+          "local": true,
+          "name": "@demo/core",
+          "resolution_source": "package-lock.json",
+          "resolved_version": "1.0.0",
+          "source": "packages/ui/package.json",
+          "specifier": "1.0.0",
+          "start_column": 21,
+          "workspace": true,
+          "workspace_link": true
+        },
+        {
+          "declaration_column_end": 27,
+          "declaration_column_start": 21,
+          "declaration_end_line": 7,
+          "declaration_line": 7,
+          "ecosystem": "npm",
+          "end_column": 27,
+          "end_line": 7,
+          "group": "runtime",
+          "id": "package:npm:lodash",
+          "import_name": "lodash",
+          "line": 7,
+          "name": "lodash",
+          "resolution_source": "package-lock.json",
+          "resolved_version": "4.17.20",
+          "source": "package.json",
+          "specifier": "^4.17.20",
+          "start_column": 21
+        }
+      ],
+      "changes": [
+        {
+          "after": "^4.17.21",
+          "before": "^4.17.20",
+          "ecosystem": "npm",
+          "group": "runtime",
+          "kind": "version_changed",
+          "name": "lodash",
+          "resolved_after": "4.17.21",
+          "resolved_before": "4.17.20",
+          "source": "package.json"
+        },
+        {
+          "after": "^1.1.1",
+          "before": null,
+          "ecosystem": "npm",
+          "group": "runtime",
+          "kind": "added",
+          "name": "picocolors",
+          "resolved_after": "1.1.1",
+          "resolved_before": null,
+          "source": "package.json"
+        }
+      ],
+      "current": [
+        {
+          "declaration_column_end": 31,
+          "declaration_column_start": 21,
+          "declaration_end_line": 5,
+          "declaration_line": 5,
+          "ecosystem": "npm",
+          "end_column": 31,
+          "end_line": 5,
+          "group": "runtime",
+          "id": "package:npm:@demo/core",
+          "import_name": "@demo/core",
+          "line": 5,
+          "local": true,
+          "name": "@demo/core",
+          "resolution_source": "package-lock.json",
+          "resolved_version": "1.0.0",
+          "source": "packages/ui/package.json",
+          "specifier": "1.0.0",
+          "start_column": 21,
+          "used_by": [],
+          "workspace": true,
+          "workspace_link": true
+        },
+        {
+          "declaration_column_end": 27,
+          "declaration_column_start": 21,
+          "declaration_end_line": 7,
+          "declaration_line": 7,
+          "ecosystem": "npm",
+          "end_column": 27,
+          "end_line": 7,
+          "group": "runtime",
+          "id": "package:npm:lodash",
+          "import_name": "lodash",
+          "line": 7,
+          "name": "lodash",
+          "resolution_source": "package-lock.json",
+          "resolved_version": "4.17.21",
+          "source": "package.json",
+          "specifier": "^4.17.21",
+          "start_column": 21,
+          "used_by": [
+            "packages/ui/src/ReferenceCard.tsx:2"
+          ]
+        },
+        {
+          "declaration_column_end": 53,
+          "declaration_column_start": 43,
+          "declaration_end_line": 7,
+          "declaration_line": 7,
+          "ecosystem": "npm",
+          "end_column": 53,
+          "end_line": 7,
+          "group": "runtime",
+          "id": "package:npm:picocolors",
+          "import_name": "picocolors",
+          "line": 7,
+          "name": "picocolors",
+          "resolution_source": "package-lock.json",
+          "resolved_version": "1.1.1",
+          "source": "package.json",
+          "specifier": "^1.1.1",
+          "start_column": 43,
+          "used_by": [
+            "packages/ui/src/StatusBadge.jsx:2"
+          ]
+        }
+      ]
+    },
+    "repository": {
+      "base_commit": "5b5816f3c40bb51ff86de5c14f59e16857d043c5",
+      "base_ref": "HEAD",
+      "generated_at": "2026-10-19T20:54:56-07:00",
+      "head": "5b5816f3c40bb51ff86de5c14f59e16857d043c5",
+      "node_loc": 53,
+      "python_loc": 0,
+      "review_languages": [
+        "node"
+      ],
+      "root": "C:\\Source\\AgentReview\\.github\\extensions\\agent-review\\tests\\.node-browser-work\\review-BT7qYa\\repo"
+    },
+    "source_files": {
+      ".gitignore": {
+        "baseline": "node_modules/\r\ndist/\r\ncoverage/\r\n",
+        "current": "node_modules/\r\ndist/\r\ncoverage/\r\n",
+        "diff": ""
+      },
+      "package-lock.json": {
+        "baseline": "{\r\n  \"name\": \"node-review-demo\",\r\n  \"lockfileVersion\": 3,\r\n  \"requires\": true,\r\n  \"packages\": {\r\n    \"\": { \"name\": \"node-review-demo\", \"workspaces\": [\"packages/*\"], \"dependencies\": { \"lodash\": \"^4.17.20\" } },\r\n    \"node_modules/@demo/core\": { \"resolved\": \"packages/core\", \"link\": true },\r\n    \"node_modules/@demo/ui\": { \"resolved\": \"packages/ui\", \"link\": true },\r\n    \"node_modules/lodash\": { \"version\": \"4.17.20\", \"resolved\": \"https://registry.npmjs.org/lodash/-/lodash-4.17.20.tgz\" },\r\n    \"packages/core\": { \"name\": \"@demo/core\", \"version\": \"1.0.0\" },\r\n    \"packages/ui\": { \"name\": \"@demo/ui\", \"version\": \"1.0.0\", \"dependencies\": { \"@demo/core\": \"1.0.0\" } }\r\n  }\r\n}\r\n",
+        "current": "{\r\n  \"name\": \"node-review-demo\",\r\n  \"lockfileVersion\": 3,\r\n  \"requires\": true,\r\n  \"packages\": {\r\n    \"\": { \"name\": \"node-review-demo\", \"workspaces\": [\"packages/*\"], \"dependencies\": { \"lodash\": \"^4.17.21\", \"picocolors\": \"^1.1.1\" } },\r\n    \"node_modules/@demo/core\": { \"resolved\": \"packages/core\", \"link\": true },\r\n    \"node_modules/@demo/ui\": { \"resolved\": \"packages/ui\", \"link\": true },\r\n    \"node_modules/lodash\": { \"version\": \"4.17.21\", \"resolved\": \"https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz\" },\r\n    \"node_modules/picocolors\": { \"version\": \"1.1.1\", \"resolved\": \"https://registry.npmjs.org/picocolors/-/picocolors-1.1.1.tgz\" },\r\n    \"packages/core\": { \"name\": \"@demo/core\", \"version\": \"1.0.0\" },\r\n    \"packages/ui\": { \"name\": \"@demo/ui\", \"version\": \"1.0.0\", \"dependencies\": { \"@demo/core\": \"1.0.0\" } }\r\n  }\r\n}\r\n",
+        "diff": "--- a/package-lock.json\n+++ b/package-lock.json\n@@ -2,12 +2,13 @@\n   \"name\": \"node-review-demo\",\n   \"lockfileVersion\": 3,\n   \"requires\": true,\n   \"packages\": {\n-    \"\": { \"name\": \"node-review-demo\", \"workspaces\": [\"packages/*\"], \"dependencies\": { \"lodash\": \"^4.17.20\" } },\n+    \"\": { \"name\": \"node-review-demo\", \"workspaces\": [\"packages/*\"], \"dependencies\": { \"lodash\": \"^4.17.21\", \"picocolors\": \"^1.1.1\" } },\n     \"node_modules/@demo/core\": { \"resolved\": \"packages/core\", \"link\": true },\n     \"node_modules/@demo/ui\": { \"resolved\": \"packages/ui\", \"link\": true },\n-    \"node_modules/lodash\": { \"version\": \"4.17.20\", \"resolved\": \"https://registry.npmjs.org/lodash/-/lodash-4.17.20.tgz\" },\n+    \"node_modules/lodash\": { \"version\": \"4.17.21\", \"resolved\": \"https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz\" },\n+    \"node_modules/picocolors\": { \"version\": \"1.1.1\", \"resolved\": \"https://registry.npmjs.org/picocolors/-/picocolors-1.1.1.tgz\" },\n     \"packages/core\": { \"name\": \"@demo/core\", \"version\": \"1.0.0\" },\n     \"packages/ui\": { \"name\": \"@demo/ui\", \"version\": \"1.0.0\", \"dependencies\": { \"@demo/core\": \"1.0.0\" } }\n   }\n }\n"
+      },
+      "package.json": {
+        "baseline": "{\r\n  \"name\": \"node-review-demo\",\r\n  \"private\": true,\r\n  \"type\": \"module\",\r\n  \"workspaces\": [\"packages/*\"],\r\n  \"scripts\": { \"test\": \"node --test packages/core/test/*.test.mjs\" },\r\n  \"dependencies\": { \"lodash\": \"^4.17.20\" }\r\n}\r\n",
+        "current": "{\r\n  \"name\": \"node-review-demo\",\r\n  \"private\": true,\r\n  \"type\": \"module\",\r\n  \"workspaces\": [\"packages/*\"],\r\n  \"scripts\": { \"test\": \"node --test packages/core/test/*.test.mjs\" },\r\n  \"dependencies\": { \"lodash\": \"^4.17.21\", \"picocolors\": \"^1.1.1\" }\r\n}\r\n",
+        "diff": "--- a/package.json\n+++ b/package.json\n@@ -3,6 +3,6 @@\n   \"private\": true,\n   \"type\": \"module\",\n   \"workspaces\": [\"packages/*\"],\n   \"scripts\": { \"test\": \"node --test packages/core/test/*.test.mjs\" },\n-  \"dependencies\": { \"lodash\": \"^4.17.20\" }\n+  \"dependencies\": { \"lodash\": \"^4.17.21\", \"picocolors\": \"^1.1.1\" }\n }\n"
+      },
+      "packages/core/package.json": {
+        "baseline": "{\r\n  \"name\": \"@demo/core\",\r\n  \"version\": \"1.0.0\",\r\n  \"type\": \"module\",\r\n  \"exports\": \"./src/index.ts\"\r\n}\r\n",
+        "current": "{\r\n  \"name\": \"@demo/core\",\r\n  \"version\": \"1.0.0\",\r\n  \"type\": \"module\",\r\n  \"exports\": \"./src/index.ts\"\r\n}\r\n",
+        "diff": ""
+      },
+      "packages/core/src/index.ts": {
+        "baseline": "export { resolveReference } from \"./resolver.js\";\r\n\r\nexport function describeReference(title: string): string {\r\n  return title;\r\n}\r\n",
+        "current": "export { resolveReference } from \"./resolver.js\";\r\n\r\nexport function describeReference(title: string): string {\r\n  if (!title.trim()) {\r\n    return \"Untitled reference\";\r\n  }\r\n  return title.trim();\r\n}\r\n",
+        "diff": "--- a/packages/core/src/index.ts\n+++ b/packages/core/src/index.ts\n@@ -1,5 +1,8 @@\n export { resolveReference } from \"./resolver.js\";\n \n export function describeReference(title: string): string {\n-  return title;\n+  if (!title.trim()) {\n+    return \"Untitled reference\";\n+  }\n+  return title.trim();\n }\n"
+      },
+      "packages/core/src/resolver.js": {
+        "baseline": "export function resolveReference(reference) {\r\n  return reference.title.trim();\r\n}\r\n",
+        "current": "export function resolveReference(reference) {\r\n  if (!reference.title) {\r\n    return null;\r\n  }\r\n  if (reference.legacy) {\r\n    throw new Error(\"Legacy references are unsupported\");\r\n  }\r\n  return reference.title.trim();\r\n}\r\n",
+        "diff": "--- a/packages/core/src/resolver.js\n+++ b/packages/core/src/resolver.js\n@@ -1,3 +1,9 @@\n export function resolveReference(reference) {\n+  if (!reference.title) {\n+    return null;\n+  }\n+  if (reference.legacy) {\n+    throw new Error(\"Legacy references are unsupported\");\n+  }\n   return reference.title.trim();\n }\n"
+      },
+      "packages/core/test/missing-title.test.mjs": {
+        "baseline": null,
+        "current": "import test from \"node:test\";\r\nimport assert from \"node:assert/strict\";\r\nimport { resolveReference } from \"../src/resolver.js\";\r\n\r\ntest(\"missing title returns null\", () => {\r\n  assert.equal(resolveReference({ title: \"\" }), null);\r\n});\r\n",
+        "diff": "--- a/packages/core/test/missing-title.test.mjs\n+++ b/packages/core/test/missing-title.test.mjs\n@@ -0,0 +1,7 @@\n+import test from \"node:test\";\n+import assert from \"node:assert/strict\";\n+import { resolveReference } from \"../src/resolver.js\";\n+\n+test(\"missing title returns null\", () => {\n+  assert.equal(resolveReference({ title: \"\" }), null);\n+});\n"
+      },
+      "packages/core/test/resolver.test.mjs": {
+        "baseline": "import test from \"node:test\";\r\nimport assert from \"node:assert/strict\";\r\nimport { resolveReference } from \"../src/resolver.js\";\r\n\r\ntest(\"resolves a title\", () => {\r\n  assert.equal(resolveReference({ title: \" Agent Review \" }), \"Agent Review\");\r\n});\r\n",
+        "current": "import test from \"node:test\";\r\nimport assert from \"node:assert/strict\";\r\nimport { writeFileSync } from \"node:fs\";\r\nimport { resolveReference } from \"../src/resolver.js\";\r\n\r\nif (process.env.AGENT_REVIEW_NODE_DEMO_MARKER) {\r\n  writeFileSync(process.env.AGENT_REVIEW_NODE_DEMO_MARKER, \"Explicit node:test execution\\n\");\r\n}\r\n\r\ntest(\"resolves a title\", () => {\r\n  assert.equal(resolveReference({ title: \" Agent Review \" }), \"Agent Review\");\r\n});\r\n",
+        "diff": "--- a/packages/core/test/resolver.test.mjs\n+++ b/packages/core/test/resolver.test.mjs\n@@ -1,7 +1,12 @@\n import test from \"node:test\";\n import assert from \"node:assert/strict\";\n+import { writeFileSync } from \"node:fs\";\n import { resolveReference } from \"../src/resolver.js\";\n+\n+if (process.env.AGENT_REVIEW_NODE_DEMO_MARKER) {\n+  writeFileSync(process.env.AGENT_REVIEW_NODE_DEMO_MARKER, \"Explicit node:test execution\\n\");\n+}\n \n test(\"resolves a title\", () => {\n   assert.equal(resolveReference({ title: \" Agent Review \" }), \"Agent Review\");\n });\n"
+      },
+      "packages/ui/package.json": {
+        "baseline": "{\r\n  \"name\": \"@demo/ui\",\r\n  \"version\": \"1.0.0\",\r\n  \"type\": \"module\",\r\n  \"dependencies\": { \"@demo/core\": \"1.0.0\" }\r\n}\r\n",
+        "current": "{\r\n  \"name\": \"@demo/ui\",\r\n  \"version\": \"1.0.0\",\r\n  \"type\": \"module\",\r\n  \"dependencies\": { \"@demo/core\": \"1.0.0\" }\r\n}\r\n",
+        "diff": ""
+      },
+      "packages/ui/src/ReferenceCard.tsx": {
+        "baseline": "import { describeReference } from \"@demo/core\";\r\n\r\nexport function ReferenceCard({ title }: { title: string }) {\r\n  return <article>{describeReference(title)}</article>;\r\n}\r\n",
+        "current": "import { describeReference } from \"@demo/core\";\r\nimport uniq from \"lodash/uniq.js\";\r\n\r\nexport function ReferenceCard({ title }: { title: string }) {\r\n  const labels = uniq([describeReference(title), \"Reviewed\"]);\r\n  return <article aria-label=\"Reference\">{labels.join(\" · \")}</article>;\r\n}\r\n",
+        "diff": "--- a/packages/ui/src/ReferenceCard.tsx\n+++ b/packages/ui/src/ReferenceCard.tsx\n@@ -1,5 +1,7 @@\n import { describeReference } from \"@demo/core\";\n+import uniq from \"lodash/uniq.js\";\n \n export function ReferenceCard({ title }: { title: string }) {\n-  return <article>{describeReference(title)}</article>;\n+  const labels = uniq([describeReference(title), \"Reviewed\"]);\n+  return <article aria-label=\"Reference\">{labels.join(\" · \")}</article>;\n }\n"
+      },
+      "packages/ui/src/StatusBadge.jsx": {
+        "baseline": "import { resolveReference } from \"../../core/src/resolver.js\";\r\n\r\nexport const StatusBadge = ({ reference }) => <span>{resolveReference(reference)}</span>;\r\n",
+        "current": "import { resolveReference } from \"../../core/src/resolver.js\";\r\nimport colors from \"picocolors\";\r\n\r\nexport const StatusBadge = ({ reference }) => {\r\n  const title = resolveReference(reference);\r\n  if (!title) {\r\n    return <span>Missing title</span>;\r\n  }\r\n  return <span>{colors.green(title)}</span>;\r\n};\r\n",
+        "diff": "--- a/packages/ui/src/StatusBadge.jsx\n+++ b/packages/ui/src/StatusBadge.jsx\n@@ -1,3 +1,10 @@\n import { resolveReference } from \"../../core/src/resolver.js\";\n+import colors from \"picocolors\";\n \n-export const StatusBadge = ({ reference }) => <span>{resolveReference(reference)}</span>;\n+export const StatusBadge = ({ reference }) => {\n+  const title = resolveReference(reference);\n+  if (!title) {\n+    return <span>Missing title</span>;\n+  }\n+  return <span>{colors.green(title)}</span>;\n+};\n"
+      },
+      "tsconfig.json": {
+        "baseline": "{\r\n  \"compilerOptions\": {\r\n    \"target\": \"ES2022\",\r\n    \"module\": \"NodeNext\",\r\n    \"moduleResolution\": \"NodeNext\",\r\n    \"allowJs\": true,\r\n    \"jsx\": \"preserve\",\r\n    \"baseUrl\": \".\",\r\n    \"paths\": { \"@demo/core\": [\"packages/core/src/index.ts\"] }\r\n  },\r\n  \"include\": [\"packages\"]\r\n}\r\n",
+        "current": "{\r\n  \"compilerOptions\": {\r\n    \"target\": \"ES2022\",\r\n    \"module\": \"NodeNext\",\r\n    \"moduleResolution\": \"NodeNext\",\r\n    \"allowJs\": true,\r\n    \"jsx\": \"preserve\",\r\n    \"baseUrl\": \".\",\r\n    \"paths\": { \"@demo/core\": [\"packages/core/src/index.ts\"] }\r\n  },\r\n  \"include\": [\"packages\"]\r\n}\r\n",
+        "diff": ""
+      }
+    },
+    "summary": {
+      "arch_edges_removed": 0,
+      "changed_functions_uncovered": 0,
+      "files_added": 1,
+      "files_changed": 8,
+      "files_modified": 7,
+      "files_removed": 0,
+      "lines_added": 37,
+      "lines_removed": 6,
+      "modules_changed": 6,
+      "new_arch_edges": 1,
+      "new_packages": 1,
+      "packages_modified": 1,
+      "packages_removed": 0,
+      "symbols_added": 0,
+      "symbols_changed": 4,
+      "symbols_modified": 4,
+      "symbols_removed": 0
+    },
+    "symbols": [
+      {
+        "classification": "modified",
+        "complexity": 3,
+        "complexity_base": 1,
+        "complexity_current": 3,
+        "id": "node:symbol:87e25f40809b0b75",
+        "identity": "packages/core/src/resolver.js:resolveReference",
+        "kind": "function",
+        "language": "node",
+        "module": "packages/core/src/resolver.js",
+        "name": "resolveReference",
+        "normalized_ast_hash": "3232b25c9f0b313b1121012cd0152dedef0edaf49dfd22eea1fdfb095e45997b",
+        "path": "packages/core/src/resolver.js",
+        "qualname": "resolveReference",
+        "range": {
+          "end_column": 1,
+          "end_line": 9,
+          "start_column": 0,
+          "start_line": 1
+        },
+        "signature": "(reference)",
+        "signature_base": "(reference)",
+        "signature_current": "(reference)",
+        "source_hash": "5b30768afb81cd6a89796c6432bb371264a610985c157a03cd54dee79cd49946"
+      },
+      {
+        "classification": "modified",
+        "complexity": 1,
+        "complexity_base": 1,
+        "complexity_current": 1,
+        "id": "node:symbol:a482c355d5400b70",
+        "identity": "packages/ui/src/ReferenceCard.tsx:ReferenceCard",
+        "kind": "function",
+        "language": "node",
+        "module": "packages/ui/src/ReferenceCard.tsx",
+        "name": "ReferenceCard",
+        "normalized_ast_hash": "bf7599afdc53da65229ff8ba7d515839e3645db2d58211870ea521f1857132c7",
+        "path": "packages/ui/src/ReferenceCard.tsx",
+        "qualname": "ReferenceCard",
+        "range": {
+          "end_column": 1,
+          "end_line": 7,
+          "start_column": 0,
+          "start_line": 4
+        },
+        "signature": "({ title }: { title: string })",
+        "signature_base": "({ title }: { title: string })",
+        "signature_current": "({ title }: { title: string })",
+        "source_hash": "1b4da84b348ce6ced4f29c924f9afe62fd9f7bdcf8401da358c229c1003c7ee6"
+      },
+      {
+        "classification": "modified",
+        "complexity": 2,
+        "complexity_base": 1,
+        "complexity_current": 2,
+        "id": "node:symbol:dc6103c30bfc03cf",
+        "identity": "packages/ui/src/StatusBadge.jsx:StatusBadge",
+        "kind": "function",
+        "language": "node",
+        "module": "packages/ui/src/StatusBadge.jsx",
+        "name": "StatusBadge",
+        "normalized_ast_hash": "8d2ca5483cdb1f257187c2f09fed0bf852f40a1176a0911d245d2d1767ac7898",
+        "path": "packages/ui/src/StatusBadge.jsx",
+        "qualname": "StatusBadge",
+        "range": {
+          "end_column": 1,
+          "end_line": 10,
+          "start_column": 13,
+          "start_line": 4
+        },
+        "signature": "({ reference })",
+        "signature_base": "({ reference })",
+        "signature_current": "({ reference })",
+        "source_hash": "a2e5e1cdb8c595e53dd72fa058b745fd45b66351e782dc67f7dc32834fb70aaa"
+      },
+      {
+        "classification": "modified",
+        "complexity": 2,
+        "complexity_base": 1,
+        "complexity_current": 2,
+        "id": "node:symbol:ff76eb2271626bd0",
+        "identity": "packages/core/src/index.ts:describeReference",
+        "kind": "function",
+        "language": "node",
+        "module": "packages/core/src/index.ts",
+        "name": "describeReference",
+        "normalized_ast_hash": "5cb1e2f7cd147a7a1adf9d986cdf50feccf20308f0a414da9943bac746409671",
+        "path": "packages/core/src/index.ts",
+        "qualname": "describeReference",
+        "range": {
+          "end_column": 1,
+          "end_line": 8,
+          "start_column": 0,
+          "start_line": 3
+        },
+        "signature": "(title: string): string",
+        "signature_base": "(title: string): string",
+        "signature_current": "(title: string): string",
+        "source_hash": "f5820161b8c1c9b7458be374d6e15af7c20d8cf58cd37bf9ab75a36101c16e98"
+      }
+    ],
+    "warnings": [
+      "[Base/current] packages/core/test/resolver.test.mjs:1: unresolved module node:test; target is unknown.",
+      "[Base] packages/core/src/resolver.js:2: unresolved call reference.title.trim; target is unknown.",
+      "[Base] packages/core/test/resolver.test.mjs:5: unresolved call test; target is unknown.",
+      "[Base] packages/core/test/resolver.test.mjs:6: unresolved call assert.equal; target is unknown.",
+      "[Current] packages/core/src/resolver.js:8: unresolved call reference.title.trim; target is unknown.",
+      "[Current] packages/core/test/missing-title.test.mjs:1: unresolved module node:test; target is unknown.",
+      "[Current] packages/core/test/missing-title.test.mjs:5: unresolved call test; target is unknown.",
+      "[Current] packages/core/test/missing-title.test.mjs:6: unresolved call assert.equal; target is unknown.",
+      "[Current] packages/core/test/resolver.test.mjs:10: unresolved call test; target is unknown.",
+      "[Current] packages/core/test/resolver.test.mjs:11: unresolved call assert.equal; target is unknown.",
+      "[Current] packages/core/test/resolver.test.mjs:7: unresolved call writeFileSync; target is unknown.",
+      "[Current] packages/ui/src/ReferenceCard.tsx:2: unresolved module lodash/uniq.js; target is unknown.",
+      "[Current] packages/ui/src/ReferenceCard.tsx:5: unresolved call uniq; target is unknown.",
+      "[Current] packages/ui/src/ReferenceCard.tsx:6: unresolved call labels.join; target is unknown.",
+      "[Current] packages/ui/src/StatusBadge.jsx:2: unresolved module picocolors; target is unknown.",
+      "[Current] packages/ui/src/StatusBadge.jsx:9: unresolved call colors.green; target is unknown."
+    ]
+  },
+  "decision_map": {
+    "adapter_id": "node",
+    "callables": [
+      {
+        "id": "node:symbol:87e25f40809b0b75",
+        "qualname": "resolveReference",
+        "path": "packages/core/src/resolver.js",
+        "change": "modified",
+        "source_hash": "a4343369810ede6d810ffd3865feabb5458883f78ad9e0985b763b04d2f9fa30",
+        "line": 1,
+        "base_line": 1,
+        "decisions_base": 1,
+        "decisions_current": 3,
+        "counts": {
+          "added": 2,
+          "removed": 0,
+          "changed": 1,
+          "moved": 0
+        },
+        "entries": [
+          {
+            "status": "added",
+            "decision": {
+              "kind": "exit",
+              "outcome": "empty",
+              "value": "null",
+              "when": [
+                "!reference.title"
+              ],
+              "when_mode": "one",
+              "only_if": [],
+              "context": [],
+              "loop": null,
+              "on_error": null,
+              "thresholds": [],
+              "line": 3,
+              "end_line": 3,
+              "column": 4,
+              "implicit": false,
+              "trace": [
+                3,
+                3
+              ]
+            },
+            "before": {
+              "line": 8,
+              "end_line": 8,
+              "label": "value reference.title.trim() when !(reference.legacy)"
+            },
+            "evidence": {
+              "level": "asserted",
+              "tests": [
+                {
+                  "id": "packages/core/test/missing-title.test.mjs::missing title returns null",
+                  "path": "packages/core/test/missing-title.test.mjs",
+                  "line": 5,
+                  "link": "direct",
+                  "changed": true,
+                  "match": "result",
+                  "assertion": {
+                    "line": 6,
+                    "text": "assert.equal(resolveReference({ title: \"\" }), null)",
+                    "kind": "assert"
+                  }
+                },
+                {
+                  "id": "packages/core/test/resolver.test.mjs::resolves a title",
+                  "path": "packages/core/test/resolver.test.mjs",
+                  "line": 10,
+                  "link": "direct",
+                  "changed": false
+                }
+              ],
+              "omitted_tests": 0
+            }
+          },
+          {
+            "status": "added",
+            "decision": {
+              "kind": "exit",
+              "outcome": "raise",
+              "value": "new Error(\"Legacy references are unsupported\")",
+              "when": [
+                "reference.legacy"
+              ],
+              "when_mode": "one",
+              "only_if": [],
+              "context": [
+                "reference.title"
+              ],
+              "loop": null,
+              "on_error": null,
+              "thresholds": [],
+              "line": 6,
+              "end_line": 6,
+              "column": 4,
+              "implicit": false,
+              "trace": [
+                6,
+                6
+              ]
+            },
+            "before": {
+              "line": 8,
+              "end_line": 8,
+              "label": "value reference.title.trim() when !(reference.legacy)"
+            },
+            "evidence": {
+              "level": "exercised",
+              "tests": [
+                {
+                  "id": "packages/core/test/missing-title.test.mjs::missing title returns null",
+                  "path": "packages/core/test/missing-title.test.mjs",
+                  "line": 5,
+                  "link": "direct",
+                  "changed": true
+                },
+                {
+                  "id": "packages/core/test/resolver.test.mjs::resolves a title",
+                  "path": "packages/core/test/resolver.test.mjs",
+                  "line": 10,
+                  "link": "direct",
+                  "changed": false
+                }
+              ],
+              "omitted_tests": 0
+            }
+          },
+          {
+            "status": "changed",
+            "decision": {
+              "kind": "exit",
+              "outcome": "value",
+              "value": "reference.title.trim()",
+              "when": [
+                "!(reference.legacy)"
+              ],
+              "when_mode": "one",
+              "only_if": [],
+              "context": [
+                "reference.title"
+              ],
+              "loop": null,
+              "on_error": null,
+              "thresholds": [],
+              "line": 8,
+              "end_line": 8,
+              "column": 2,
+              "implicit": false,
+              "trace": [
+                8,
+                8
+              ]
+            },
+            "base": {
+              "kind": "exit",
+              "outcome": "value",
+              "value": "reference.title.trim()",
+              "when": [],
+              "when_mode": "none",
+              "only_if": [],
+              "context": [],
+              "loop": null,
+              "on_error": null,
+              "thresholds": [],
+              "line": 2,
+              "end_line": 2,
+              "column": 2,
+              "implicit": false,
+              "trace": [
+                2,
+                2
+              ]
+            },
+            "changed_fields": [
+              "when",
+              "context"
+            ],
+            "evidence": {
+              "level": "exercised",
+              "tests": [
+                {
+                  "id": "packages/core/test/missing-title.test.mjs::missing title returns null",
+                  "path": "packages/core/test/missing-title.test.mjs",
+                  "line": 5,
+                  "link": "direct",
+                  "changed": true
+                },
+                {
+                  "id": "packages/core/test/resolver.test.mjs::resolves a title",
+                  "path": "packages/core/test/resolver.test.mjs",
+                  "line": 10,
+                  "link": "direct",
+                  "changed": false
+                }
+              ],
+              "omitted_tests": 0
+            }
+          }
+        ],
+        "omitted_entries": 0,
+        "truncated": false
+      },
+      {
+        "id": "node:symbol:a482c355d5400b70",
+        "qualname": "ReferenceCard",
+        "path": "packages/ui/src/ReferenceCard.tsx",
+        "change": "modified",
+        "source_hash": "df0041d257955ed9c4f0312fcc2fe65afa85ec299d9a28f3ecb61e445b8b74f0",
+        "line": 4,
+        "base_line": 3,
+        "decisions_base": 1,
+        "decisions_current": 1,
+        "counts": {
+          "added": 0,
+          "removed": 0,
+          "changed": 1,
+          "moved": 0
+        },
+        "entries": [
+          {
+            "status": "changed",
+            "decision": {
+              "kind": "exit",
+              "outcome": "value",
+              "value": "<article aria-label=\"Reference\">{labels.join(\" · \")}</article>",
+              "when": [],
+              "when_mode": "none",
+              "only_if": [],
+              "context": [],
+              "loop": null,
+              "on_error": null,
+              "thresholds": [],
+              "line": 6,
+              "end_line": 6,
+              "column": 2,
+              "implicit": false,
+              "trace": [
+                6,
+                6
+              ]
+            },
+            "base": {
+              "kind": "exit",
+              "outcome": "value",
+              "value": "<article>{describeReference(title)}</article>",
+              "when": [],
+              "when_mode": "none",
+              "only_if": [],
+              "context": [],
+              "loop": null,
+              "on_error": null,
+              "thresholds": [],
+              "line": 4,
+              "end_line": 4,
+              "column": 2,
+              "implicit": false,
+              "trace": [
+                4,
+                4
+              ]
+            },
+            "changed_fields": [
+              "value"
+            ],
+            "evidence": {
+              "level": "none",
+              "tests": [],
+              "omitted_tests": 0
+            }
+          }
+        ],
+        "omitted_entries": 0,
+        "truncated": false
+      },
+      {
+        "id": "node:symbol:dc6103c30bfc03cf",
+        "qualname": "StatusBadge",
+        "path": "packages/ui/src/StatusBadge.jsx",
+        "change": "modified",
+        "source_hash": "237bcdb07c96ae230882f728464b0a46f084c8c1d62826e571d1e8f77302e505",
+        "line": 4,
+        "base_line": 3,
+        "decisions_base": 1,
+        "decisions_current": 2,
+        "counts": {
+          "added": 1,
+          "removed": 0,
+          "changed": 1,
+          "moved": 0
+        },
+        "entries": [
+          {
+            "status": "changed",
+            "decision": {
+              "kind": "exit",
+              "outcome": "value",
+              "value": "<span>Missing title</span>",
+              "when": [
+                "!title"
+              ],
+              "when_mode": "one",
+              "only_if": [],
+              "context": [],
+              "loop": null,
+              "on_error": null,
+              "thresholds": [],
+              "line": 7,
+              "end_line": 7,
+              "column": 4,
+              "implicit": false,
+              "trace": [
+                7,
+                7
+              ]
+            },
+            "base": {
+              "kind": "exit",
+              "outcome": "value",
+              "value": "<span>{resolveReference(reference)}</span>",
+              "when": [],
+              "when_mode": "none",
+              "only_if": [],
+              "context": [],
+              "loop": null,
+              "on_error": null,
+              "thresholds": [],
+              "line": 3,
+              "end_line": 3,
+              "column": 46,
+              "implicit": false,
+              "trace": null
+            },
+            "changed_fields": [
+              "value",
+              "when"
+            ],
+            "evidence": {
+              "level": "none",
+              "tests": [],
+              "omitted_tests": 0
+            }
+          },
+          {
+            "status": "added",
+            "decision": {
+              "kind": "exit",
+              "outcome": "value",
+              "value": "<span>{colors.green(title)}</span>",
+              "when": [
+                "title"
+              ],
+              "when_mode": "one",
+              "only_if": [],
+              "context": [],
+              "loop": null,
+              "on_error": null,
+              "thresholds": [],
+              "line": 9,
+              "end_line": 9,
+              "column": 2,
+              "implicit": false,
+              "trace": [
+                9,
+                9
+              ]
+            },
+            "after": {
+              "line": 7,
+              "end_line": 7,
+              "label": "value <span>Missing title</span> when !title"
+            },
+            "evidence": {
+              "level": "none",
+              "tests": [],
+              "omitted_tests": 0
+            }
+          }
+        ],
+        "omitted_entries": 0,
+        "truncated": false
+      },
+      {
+        "id": "node:symbol:ff76eb2271626bd0",
+        "qualname": "describeReference",
+        "path": "packages/core/src/index.ts",
+        "change": "modified",
+        "source_hash": "2b7f4cf760e6c93ee5485fffa572133734805842263f30da4423aa7c13c68126",
+        "line": 3,
+        "base_line": 3,
+        "decisions_base": 1,
+        "decisions_current": 2,
+        "counts": {
+          "added": 1,
+          "removed": 0,
+          "changed": 1,
+          "moved": 0
+        },
+        "entries": [
+          {
+            "status": "changed",
+            "decision": {
+              "kind": "exit",
+              "outcome": "value",
+              "value": "\"Untitled reference\"",
+              "when": [
+                "!title.trim()"
+              ],
+              "when_mode": "one",
+              "only_if": [],
+              "context": [],
+              "loop": null,
+              "on_error": null,
+              "thresholds": [],
+              "line": 5,
+              "end_line": 5,
+              "column": 4,
+              "implicit": false,
+              "trace": [
+                5,
+                5
+              ]
+            },
+            "base": {
+              "kind": "exit",
+              "outcome": "value",
+              "value": "title",
+              "when": [],
+              "when_mode": "none",
+              "only_if": [],
+              "context": [],
+              "loop": null,
+              "on_error": null,
+              "thresholds": [],
+              "line": 4,
+              "end_line": 4,
+              "column": 2,
+              "implicit": false,
+              "trace": [
+                4,
+                4
+              ]
+            },
+            "changed_fields": [
+              "value",
+              "when"
+            ],
+            "evidence": {
+              "level": "none",
+              "tests": [],
+              "omitted_tests": 0
+            }
+          },
+          {
+            "status": "added",
+            "decision": {
+              "kind": "exit",
+              "outcome": "value",
+              "value": "title.trim()",
+              "when": [
+                "title.trim()"
+              ],
+              "when_mode": "one",
+              "only_if": [],
+              "context": [],
+              "loop": null,
+              "on_error": null,
+              "thresholds": [],
+              "line": 7,
+              "end_line": 7,
+              "column": 2,
+              "implicit": false,
+              "trace": [
+                7,
+                7
+              ]
+            },
+            "after": {
+              "line": 5,
+              "end_line": 5,
+              "label": "value \"Untitled reference\" when !title.trim()"
+            },
+            "evidence": {
+              "level": "none",
+              "tests": [],
+              "omitted_tests": 0
+            }
+          }
+        ],
+        "omitted_entries": 0,
+        "truncated": false
+      }
+    ],
+    "totals": {
+      "added": 4,
+      "removed": 0,
+      "changed": 4,
+      "moved": 0,
+      "callables": 4,
+      "callables_changed": 4
+    },
+    "verification": {
+      "tests": [
+        {
+          "id": "packages/core/test/missing-title.test.mjs::missing title returns null",
+          "path": "packages/core/test/missing-title.test.mjs",
+          "line": 5,
+          "name": "missing title returns null",
+          "adapter": "node",
+          "adapter_id": "node",
+          "source_hash": "ae6d607d5f2e12a95ea42324536873a5263089d2cfea516ad1452c08054550f8",
+          "runner": "node:test",
+          "suite": false,
+          "nested": false,
+          "concurrent": false,
+          "skip": false,
+          "todo": false,
+          "test_file_count": 1,
+          "link": "direct",
+          "via": null,
+          "changed": true,
+          "callables": [
+            "resolveReference"
+          ],
+          "callable_ids": [
+            "node:symbol:87e25f40809b0b75"
+          ],
+          "matches": 1
+        },
+        {
+          "id": "packages/core/test/resolver.test.mjs::resolves a title",
+          "path": "packages/core/test/resolver.test.mjs",
+          "line": 10,
+          "name": "resolves a title",
+          "adapter": "node",
+          "adapter_id": "node",
+          "source_hash": "ff53119be08d47ad8addab0f976fcb8ac39c5f96856c7569aae0515c7f6bcfb6",
+          "runner": "node:test",
+          "suite": false,
+          "nested": false,
+          "concurrent": false,
+          "skip": false,
+          "todo": false,
+          "test_file_count": 1,
+          "link": "direct",
+          "via": null,
+          "changed": false,
+          "callables": [
+            "resolveReference"
+          ],
+          "callable_ids": [
+            "node:symbol:87e25f40809b0b75"
+          ],
+          "matches": 0
+        }
+      ],
+      "omitted_tests": 0,
+      "test_files_examined": 2,
+      "limited": false
+    },
+    "source_hashes": {
+      "packages/core/src/resolver.js": "a4343369810ede6d810ffd3865feabb5458883f78ad9e0985b763b04d2f9fa30",
+      "packages/ui/src/ReferenceCard.tsx": "df0041d257955ed9c4f0312fcc2fe65afa85ec299d9a28f3ecb61e445b8b74f0",
+      "packages/ui/src/StatusBadge.jsx": "237bcdb07c96ae230882f728464b0a46f084c8c1d62826e571d1e8f77302e505",
+      "packages/core/src/index.ts": "2b7f4cf760e6c93ee5485fffa572133734805842263f30da4423aa7c13c68126",
+      "packages/core/test/missing-title.test.mjs": "ae6d607d5f2e12a95ea42324536873a5263089d2cfea516ad1452c08054550f8",
+      "packages/core/test/resolver.test.mjs": "ff53119be08d47ad8addab0f976fcb8ac39c5f96856c7569aae0515c7f6bcfb6"
+    },
+    "files_examined": 4,
+    "limited": false,
+    "warnings": [],
+    "elapsed_ms": 64,
+    "status": "complete",
+    "total_ms": 1213
+  }
+}

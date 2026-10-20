@@ -26,6 +26,11 @@ try {
                 `Primary review action must be above the fold at ${width}px: ${JSON.stringify(bounds)}`);
             assert.equal(await page.locator("#review-background").evaluate((details) => details.open), false);
             assert.match(await page.locator("#overview-progress").textContent(), /changed files?/);
+            assert.equal(await page.locator("#breadcrumbs").isVisible(), false, "the Overview has one reading path, not a Review plan link");
+            assert.equal(await page.locator("#summary").isVisible(), false, "metric cards stay behind the change-summary disclosure");
+            assert.equal(await page.locator("#review-target-label").isVisible(), false, "the target identity appears once, in the workflow row");
+            assert.equal(await page.locator("#review-overview .review-next, #overview-start").count(), 1, "one green primary on the Overview");
+            if (width === 390) assert.ok(bounds.y <= 420, `Primary action must sit high on narrow screens: ${bounds.y}`);
             assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
             if (process.env.AGENT_REVIEW_SCREENSHOT_DIR) {
                 await mkdir(process.env.AGENT_REVIEW_SCREENSHOT_DIR, { recursive: true });

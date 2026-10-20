@@ -72,7 +72,7 @@ try {
         await resumed.goto(`${url}?scoutTheme=${theme}`);
         await resumed.waitForFunction(() => document.querySelector("#overview-start")?.textContent === "Review summary"
             && !document.querySelector("#overview-start").disabled);
-        assert.match(await resumed.locator("#overview-progress").textContent(), /2 reviewed/);
+        assert.match(await resumed.locator("#overview-progress").textContent(), /2 of 2 changed files reviewed/);
         await resumed.locator("#overview-start").click();
         await resumed.locator("#review-finish").waitFor();
         assert.match(await resumed.locator("#review-finish").textContent(), /Check this boundary before handoff/);

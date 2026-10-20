@@ -26,8 +26,9 @@
                 <button id="review-list-refresh" class="hidden" type="button" title="Fetch remote commits or reload pull requests added since this list was opened">Refresh list</button>
                 <button id="review-more" class="hidden" type="button">Load more</button>
             </form>
-            <span id="status" class="status">Connecting</span>
+            <button id="status" class="status" type="button" aria-expanded="false" aria-controls="worktree-notice" aria-disabled="true">Connecting</button>
             <button id="review-command-open" type="button" disabled title="Find review items and keyboard shortcuts (Ctrl+K)">Find / shortcuts</button>
+            <button id="change-repository" class="link-button" type="button">Change repository</button>
             <button id="refresh" type="button" title="Refresh the selected snapshot and rerun AI summaries, custom checks, and package assessments instead of using saved results">Reanalyze</button>
         </div>
     </header>
@@ -42,9 +43,9 @@
         <details class="workspace-explore">
             <summary>Explore</summary>
             <div>
-                <button id="explore-priorities" type="button">Priority queue</button>
+                <button id="explore-priorities" type="button">Attention</button>
                 <button id="explore-concerns" type="button">All concerns</button>
-                <button id="explore-groups" type="button">Grouping details</button>
+                <button id="explore-groups" type="button">Sections by layer</button>
                 <button id="explore-architecture" type="button">Architecture</button>
                 <button id="explore-paths" type="button">Code paths</button>
                 <button id="explore-packages" type="button">Dependencies</button>
@@ -67,7 +68,6 @@
         <p id="review-target-label" class="review-target-label"></p>
         <div class="repository-row">
             <p id="repository-identity" class="repository-identity"></p>
-            <button id="change-repository" class="link-button" type="button">Change repository</button>
         </div>
         <section id="connection-notice" class="flash flash-attention worktree-notice hidden" role="status">
             <span>Connection to Agent Review was lost. Retrying automatically. If it does not return, close this canvas tab and reopen Agent Review in this same session. Your code and commits are unaffected.</span>
@@ -75,7 +75,6 @@
         </section>
         <section id="worktree-notice" class="flash flash-attention worktree-notice hidden" role="status" aria-live="polite">
             <span id="worktree-notice-text"></span>
-            <button id="worktree-reanalyze" type="button">Reanalyze</button>
         </section>
         <section id="error" class="error hidden" role="alert"></section>
         <section id="analysis-cancelled" class="review-picker-notice hidden" role="status">
@@ -114,6 +113,8 @@
                 <ol id="overview-layers" class="overview-layers"></ol>
             </section>
             <p id="overview-progress" class="overview-progress"></p>
+            <p id="overview-stats" class="overview-stats muted"></p>
+            <p id="overview-limitation" class="overview-limitation hidden"></p>
             <p id="overview-scope" class="muted"></p>
             <p id="review-progress-status" class="muted" role="status"></p>
             <button id="review-progress-retry" class="link-button hidden" type="button">Reload saved progress</button>
@@ -122,6 +123,7 @@
         <section id="review-finish" class="review-finish hidden" aria-label="Review summary" tabindex="-1"></section>
         <details id="review-background" class="review-background hidden">
             <summary>Change summary, intent and advanced checks</summary>
+        <section id="summary" class="summary" aria-label="Change summary"></section>
         <section id="change-brief" class="change-brief" aria-label="Change brief"></section>
         <section id="custom-analyses" class="custom-analyses hidden" aria-label="Custom analyses">
             <div class="custom-heading">
@@ -131,7 +133,6 @@
             <div id="custom-results"></div>
         </section>
         </details>
-        <section id="summary" class="summary" aria-label="Change summary"></section>
         <nav id="breadcrumbs" class="breadcrumbs" aria-label="Review level"></nav>
         <section class="workspace detail-collapsed">
             <aside class="rail">

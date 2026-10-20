@@ -48,8 +48,13 @@ try {
         const original = state.model;
         const generation = state.reviewGeneration;
         await writeFile(join(repo, "main.py"), source(2));
-        await page.locator("#worktree-notice").waitFor();
+        await page.waitForFunction(() => document.querySelector("#status").classList.contains("stale"));
         assert.equal(await page.locator("#status").textContent(), "Worktree changed");
+        assert.equal(await page.locator("#worktree-notice").isVisible(), false, "freshness is one header chip until opened");
+        await page.click("#status");
+        await page.locator("#worktree-notice").waitFor();
+        assert.equal(await page.locator("#status").getAttribute("aria-expanded"), "true");
+        assert.equal(await page.locator("button", { hasText: /^Reanalyze$/ }).count(), 1, "one Reanalyze control");
         assert.match(await page.locator("#clean-review").textContent(), /Previous snapshot had no changes/);
         assert.equal(state.model, original);
         assert.equal(state.reviewGeneration, generation, "detection does not restart analysis or AI");
@@ -61,7 +66,7 @@ try {
             path: join(process.env.AGENT_REVIEW_SCREENSHOT_DIR, `worktree-stale-${theme}.png`), fullPage: true,
         });
         const response = page.waitForResponse((res) => res.url().endsWith("/api/refresh"));
-        await page.click("#worktree-reanalyze");
+        await page.click("#refresh");
         assert.equal((await response).status(), 202);
         await page.waitForFunction(() => document.querySelector("#status").textContent === "Analysis current");
         assert.equal(await page.locator("#worktree-notice").isVisible(), false);
@@ -74,10 +79,10 @@ try {
         await page.waitForTimeout(600);
         assert.equal(await page.locator("#worktree-notice").isVisible(), false);
         await page.selectOption("#review-mode", "worktree");
-        await page.locator("#worktree-notice").waitFor();
+        await page.waitForFunction(() => document.querySelector("#status").classList.contains("stale"));
         assert.equal(state.restoredFromCache, true);
         assert.match(state.model.source_files["main.py"].current, /return 2/);
-        await page.click("#worktree-reanalyze");
+        await page.click("#refresh");
         await page.waitForFunction(() => document.querySelector("#status").textContent === "Analysis current");
         assert.match(state.model.source_files["main.py"].current, /return 3/);
         const snapshot = state.model;

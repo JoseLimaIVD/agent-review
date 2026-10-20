@@ -178,6 +178,16 @@ h3 { margin-top: 20px; font-size: .8125rem; }
   gap: 16px;
 }
 .status { color: var(--cp-text-muted); font-size: .75rem; }
+button.status { justify-self: start; max-width: 100%; padding: 2px 6px; border: 1px solid transparent; border-radius: 12px; background: none; font: inherit; font-size: .75rem; text-align: left; cursor: default; }
+button.status.stale { border-color: var(--cp-warning); cursor: pointer; }
+button.status.stale::after { content: " ▾"; }
+button.status.stale:hover { background: var(--cp-surface-soft); }
+#refresh.needs-attention { border-color: var(--cp-warning); }
+/* Once a review is open, its identity lives in the workflow row and Find lives in the workspace. */
+body.review-ready #review-target-label, body.review-ready .repository-row, body.review-ready #review-command-open { display: none; }
+.overview-stats { margin: 4px 0 0; font-size: 12px; }
+.overview-limitation { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 4px 0 0; font-size: 12px; color: var(--cp-text-muted); }
+.overview-limitation strong { color: var(--cp-warning); font-weight: 600; }
 .status::before {
   content: "";
   display: inline-block;
@@ -1066,7 +1076,7 @@ main { padding: 16px 20px 32px; }
   border-color: var(--cp-border-strong);
   background: var(--cp-surface-soft);
 }
-.review-rank {
+.review-rank, .layer-chip {
   display: grid;
   place-items: center;
   width: 24px;
@@ -1077,6 +1087,9 @@ main { padding: 16px 20px 32px; }
   font-size: .75rem;
   font-weight: 600;
 }
+.review-plan-layer { margin: 12px 0 0; font-size: .8125rem; font-weight: 600; color: var(--cp-text-muted); }
+.review-plan-layer:first-of-type { margin-top: 4px; }
+.layer-chip-inline { display: inline-grid; width: 20px; height: 20px; margin-right: 8px; font-size: .6875rem; vertical-align: middle; }
 .review-plan-copy { min-width: 0; display: grid; gap: 5px; }
 .review-plan-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .review-plan-heading strong { min-width: 0; overflow-wrap: anywhere; font-size: .875rem; }
@@ -1091,7 +1104,7 @@ main { padding: 16px 20px 32px; }
 }
 .disposition-reviewed, .disposition-accepted { border-color: var(--cp-success); color: var(--cp-success); }
 .disposition-follow-up { border-color: var(--cp-warning); color: var(--cp-warning); }
-.review-plan-row.is-reviewed .review-rank { border-color: var(--cp-success); color: var(--cp-success); }
+.review-plan-row.is-reviewed .review-rank, .review-plan-row.is-reviewed .layer-chip { border-color: var(--cp-success); color: var(--cp-success); }
 .review-plan-row.needs-follow-up { border-color: var(--cp-warning); }
 .review-plan-path { color: var(--cp-text-muted); font: .75rem Consolas, "Courier New", Courier, monospace; overflow-wrap: anywhere; }
 .review-plan-note {
@@ -1759,24 +1772,25 @@ h3 { font-size: 14px; font-weight: 600; }
 .closed-label { display: inline-block; border: 1px solid var(--cp-border); border-radius: 12px; padding: 0 6px; font-size: 11px; color: var(--cp-text-muted); background: var(--cp-surface-soft); }
 .review-target-label { color: var(--cp-text-muted); font-size: 12px; margin-bottom: 12px; overflow-wrap: anywhere; }
 .repository-identity { color: var(--cp-text-muted); font-size: 12px; margin: -8px 0 12px; overflow-wrap: anywhere; }
-.topbar { display: grid; grid-template-columns: minmax(160px, 1fr) 150px auto auto; gap: 8px 16px; align-items: center; }
+.topbar { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(0, 220px) auto auto auto; gap: 8px 16px; align-items: center; }
 html { scrollbar-gutter: stable; }
 .topbar > div:first-child { min-width: 0; white-space: nowrap; }
 .top-actions { display: contents; }
 .top-actions > .status { grid-column: 2; grid-row: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.top-actions > #review-command-open { grid-column: 3; grid-row: 1; }
-.top-actions > #refresh { grid-column: 4; grid-row: 1; width: 100%; }
+.top-actions > #change-repository { grid-column: 3; grid-row: 1; white-space: nowrap; }
+.top-actions > #review-command-open { grid-column: 4; grid-row: 1; }
+.top-actions > #refresh { grid-column: 5; grid-row: 1; width: 100%; }
 @media (max-width: 600px) {
   .topbar { grid-template-columns: minmax(0, 1fr) 130px; }
   .topbar > div:first-child { grid-column: 1; }
-  .top-actions > .status { grid-column: 1; grid-row: 2; }
+  .top-actions > #change-repository { grid-column: 1; grid-row: 2; justify-self: start; }
   .top-actions > #refresh { grid-column: 2; grid-row: 2; }
   .top-actions > #review-command-open { grid-column: 1; grid-row: 3; }
   .top-actions > .status { grid-column: 2; grid-row: 1; }
-  .review-target-form { grid-row: 3; grid-template-columns: 100px minmax(0, 1fr); }
-  .review-target-form #review-ref { grid-column: 1 / -1; }
-  .review-target-form #review-list-refresh { grid-column: 1; }
-  .review-target-form #review-more { grid-column: 2; }
+  .review-target-form { grid-row: 3; grid-template-columns: auto minmax(0, 1fr) auto auto; }
+  .review-target-form #review-ref { grid-column: 1 / -1; grid-row: 2; }
+  .review-target-form #review-list-refresh { grid-column: 3; grid-row: 1; }
+  .review-target-form #review-more { grid-column: 4; grid-row: 1; }
 }
 .review-target-form #review-more.hidden, .review-target-form #review-list-refresh.hidden, .review-target-form #review-ref.hidden { display: none !important; }
 @media (max-width: 600px) { .review-target-form { grid-row: 4; } }
@@ -2165,7 +2179,7 @@ body.reviewing.review-source-focus .source-body { grid-template-columns: minmax(
 @media (max-width: 900px) {
   .review-workflow { flex-wrap: wrap; gap: 4px; padding: 6px; }
   .workspace-target { flex-basis: 100%; order: 3; }
-  #workspace-nav-toggle { display: inline-block; }
+  body.reviewing #workspace-nav-toggle { display: inline-block; }
   .review-navigation { width: min(82vw, 300px); z-index: 150; box-shadow: 2px 0 12px #0003; }
   body.reviewing .workspace { left: 0; grid-template-columns: minmax(0, 1fr) !important; }
   body.reviewing .workspace .detail { display: none; }

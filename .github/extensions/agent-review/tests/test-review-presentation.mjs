@@ -16,6 +16,9 @@ test("the overview foregrounds a bounded behavioral summary without hiding the f
     assert.equal(overviewBlurb("## Summary\n- Requested: No session intent was supplied; inspect the commit.\n- Policies now use seconds.\n## Gaps\n- Tests unknown."), "Policies now use seconds.");
     assert.equal(overviewBlurb(""), "");
     assert.ok(overviewBlurb(`## Summary\n- ${"word ".repeat(200)}`).length <= 361);
+    const long = `## Summary\n- ${"first ".repeat(80).trim()}.\n- Second sentence.\n- Third sentence is only in the full text.\n## Gaps\n- None.`;
+    assert.match(overviewBlurb(long), /…$/, "the Overview blurb is bounded");
+    assert.match(overviewBlurb(long, { full: true }), /Second sentence\. Third sentence is only in the full text\.$/, "Show more reveals every summary bullet");
 });
 test("progressive explanations retain preambles and do not mistake fenced code for section headings", () => {
     const parsed = annotationSections("Context.\n## What changed\n- A change.\n```md\n## Not a real heading\n```\n## Verify\n- Check it.");

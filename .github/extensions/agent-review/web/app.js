@@ -15,7 +15,7 @@ import { buildReviewPlan } from "/review-plan.mjs";
 import { fileTree, groupForSource, reviewSequence, workspaceNavigation } from "/review-workspace.mjs";
 import { countLabel, plural } from "/count-format.mjs";
 import {
-    REVIEW_DISPOSITIONS, effectiveDisposition, fileReviewId, fileReviewProgress, isReviewComplete, nextFileReview, nextReviewItem, parseReviewLedger, reviewProgress,
+    REVIEW_DISPOSITIONS, effectiveDisposition, fileReviewId, fileReviewProgress, isReviewComplete, nextFileReview, parseReviewLedger, reviewProgress,
     reviewSnapshotKey, serializeReviewLedger,
 } from "/review-ledger.mjs";
 import {
@@ -57,7 +57,7 @@ const state = {
     fileReviewDrafts: new Map(),
 };
 const elements = Object.fromEntries([
-    "source-coverage", "overview-layers",
+    "source-coverage", "overview-layers", "overview-stats", "overview-limitation",
     "review-target-form", "review-mode", "review-ref", "review-target-label", "repository-identity", "review-list-refresh", "review-more", "review-options-status", "review-picker-notice", "clean-review", "change-brief",
     "review-overview", "review-background", "overview-title", "overview-description", "overview-progress", "overview-scope", "overview-start", "overview-files",
     "review-workflow", "workflow-overview", "workflow-review", "workflow-finish", "review-finish", "workspace-target", "workspace-find", "workspace-nav-toggle",
@@ -71,7 +71,7 @@ const elements = Object.fromEntries([
     "review-handoff", "handoff-close", "handoff-status", "handoff-error", "handoff-refresh", "handoff-markdown",
     "handoff-markdown-save", "handoff-state-save", "handoff-state-preview", "handoff-import-file", "handoff-import-preview",
     "handoff-import-confirm", "handoff-import-error", "handoff-provider", "handoff-provider-status", "handoff-provider-error", "handoff-confirm", "handoff-submit",
-    "status", "refresh", "cancel-analysis", "analysis-cancelled", "source-context-notice", "connection-notice", "reconnect", "worktree-notice", "worktree-notice-text", "worktree-reanalyze", "error", "analysis-progress", "progress-phase", "progress-message", "progress-percent",
+    "status", "refresh", "cancel-analysis", "analysis-cancelled", "source-context-notice", "connection-notice", "reconnect", "worktree-notice", "worktree-notice-text", "error", "analysis-progress", "progress-phase", "progress-message", "progress-percent",
     "progress-bar", "summary", "breadcrumbs", "attention", "attention-count", "packages", "rail-resize", "impact-view", "source-impact",
     "show-evidence", "show-discussion", "item-discussion", "sections-view", "source-section",
     "source-focus", "source-location", "review-command-open", "review-command-palette", "review-command-close", "review-command-query", "review-command-count", "review-command-results",
@@ -104,10 +104,13 @@ const discussionPane = new ItemDiscussionPane(elements.item_discussion, {
 function renderWorkspaceShell() {
     const ready = Boolean(state.payload?.model && !state.reviewPickerPending && !state.reviewSubmitting);
     const reviewing = ready && state.reviewPage === "review";
+    document.body.classList.toggle("review-ready", ready);
     elements.review_workflow.classList.toggle("hidden", !ready);
     document.body.classList.toggle("reviewing", reviewing);
     document.body.classList.toggle("reading-source", reviewing && !elements.source_panel.classList.contains("hidden"));
     document.body.classList.toggle("workspace-exploring", Boolean(state.exploring));
+    elements.source_section.textContent = reviewing && !state.exploring ? "Layer" : "Section";
+    elements.source_section.title = reviewing && !state.exploring ? "Show this file's layer in the reading path" : "Show the analyzer section for this code";
     document.body.dataset.readingPane = state.readingPane;
     elements.workflow_overview.setAttribute("aria-current", state.reviewPage === "overview" ? "page" : "false");
     elements.workflow_review.setAttribute("aria-current", reviewing ? "page" : "false");
@@ -118,6 +121,7 @@ function renderWorkspaceShell() {
     const meta = state.payload?.model?.metadata;
     elements.workspace_target.textContent = meta ? `${meta.repo_root?.split(/[\\/]/).at(-1) || "Repository"} · ${
         state.payload.review_target?.label || "Saved target"} · Base ${meta.base_sha?.slice(0, 8) || "empty"}` : "";
+    elements.workspace_target.title = meta?.repo_root || "";
     elements.workspace_target.title = meta?.repo_root || "";
     const narrow = matchMedia("(max-width: 900px)").matches;
     const drawer = reviewing && narrow && state.navigationOpen;
@@ -995,20 +999,27 @@ function renderSummary(model) {
     const packageDetail = (model.package_changes || []).slice(0, 2).map((item) =>
         `${item.name} ${item.resolved_current || item.declared_current?.map((entry) => entry.specifier).filter(Boolean).join(", ") || item.change}`
     ).join(" · ") || "No dependency changes";
-    elements.summary.replaceChildren(
+    elements.summary.replaceChildren(...[
         deltaMetric("Files", summary.files_added, summary.files_removed, fileDetail, "files", summary.files_modified || 0),
         deltaMetric("Lines", summary.lines_added, summary.lines_removed,
             `source ${countLabel(split.source, "line")} · tests ${countLabel(split.tests, "line")} changed`, "lines"),
-        decisionMetric(state.payload?.decision_map),
+        state.payload?.decision_map ? decisionMetric(state.payload.decision_map) : null,
         deltaMetric("Architecture edges", summary.new_arch_edges, summary.arch_edges_removed, topEdge
             ? `Largest: ${moduleName(topEdge.source)} → ${moduleName(topEdge.target)}`
             : "No module relationship changes", "edges"),
         deltaMetric("Packages", summary.new_packages, summary.packages_removed, packageDetail, "packages", summary.packages_modified || 0),
-    );
+    ].filter(Boolean));
+    const edges = (summary.new_arch_edges || 0) + (summary.arch_edges_removed || 0);
+    const packages = (summary.new_packages || 0) + (summary.packages_removed || 0) + (summary.packages_modified || 0);
+    elements.overview_stats.textContent = [
+        `+${(summary.lines_added || 0).toLocaleString()} −${(summary.lines_removed || 0).toLocaleString()} lines`,
+        edges ? `${countLabel(edges, "architecture edge")} changed` : "no architecture changes",
+        packages ? `${countLabel(packages, "package change")}` : "no package changes",
+    ].join(" · ");
     const qualityIssues = [];
     const historical = ["commit", "pr"].includes(state.payload?.review_target?.mode);
-    const warnings = (model.warnings || []).filter((warning) => !historical
-        || warning !== "Worktree coverage is not applicable to a historical commit or PR snapshot.");
+    // Count every analyzer note so the Overview, Evidence and the handoff agree.
+    const warnings = model.warnings || [];
     const coverageOptions = [];
     if (meta.node_loc !== undefined) coverageOptions.push("source-matched LCOV/Istanbul JSON");
     if (meta.go_loc !== undefined) coverageOptions.push("a Go coverprofile with coverage.sources.json hashes");
@@ -1021,19 +1032,38 @@ function renderSummary(model) {
         : `No usable coverage report for this worktree snapshot. ${coveragePrerequisite}, then Reanalyze.`);
     if (warnings.length) qualityIssues.push(
         `${countLabel(warnings.length, "static-analysis note")} ${plural(warnings.length, "describes", "describe")} what could not be verified.`);
+    elements.overview_limitation.replaceChildren();
+    elements.overview_limitation.classList.toggle("hidden", !qualityIssues.length);
     if (qualityIssues.length) {
-        const quality = el("button", "quality-warning");
-        quality.type = "button";
-        quality.append(el("strong", "", !model.coverage?.available && !warnings.length ? "Coverage unavailable" : "Analysis limitation"), el("span", "", qualityIssues.join(" ")));
-        quality.addEventListener("click", () => {
+        const title = !model.coverage?.available && !warnings.length ? "Coverage unavailable" : "Analysis limitation";
+        const openLimitations = () => {
             state.selected = {
                 id: "analysis-quality", kind: "analysis", name: "Analysis limitations",
                 reason: qualityIssues.join("\n"),
                 analysis_warnings: warnings,
             };
+            // The detail pane lives in the workspace; open it there so the limitation is visible in one click.
+            if (state.reviewPage !== "review" || !state.exploring) {
+                rememberWorkspaceSource();
+                state.reviewPage = "review";
+                state.exploring = true;
+                state.mode = "findings";
+                state.stack = [];
+                elements.source_panel.classList.add("hidden");
+                render();
+            }
+            setDetailVisible(true);
             renderDetail(state.selected);
-        });
+        };
+        const quality = el("button", "quality-warning");
+        quality.type = "button";
+        quality.append(el("strong", "", title), el("span", "", qualityIssues.join(" ")));
+        quality.addEventListener("click", openLimitations);
         elements.summary.append(quality);
+        const details = el("button", "link-button", "Details");
+        details.type = "button";
+        details.addEventListener("click", openLimitations);
+        elements.overview_limitation.append(el("strong", "", title), el("span", "", qualityIssues.join(" ")), details);
     }
     elements.summary.title = `${meta.base_ref || "base"} @ ${(meta.base_sha || "").slice(0, 8)} → ${(meta.head_sha || "").slice(0, 8)} · ${meta.python_loc || 0} Python LOC${meta.node_loc !== undefined ? ` · ${meta.node_loc} JavaScript/TypeScript LOC` : ""}${meta.csharp_loc != null ? ` · ${meta.csharp_loc} C# LOC` : ""}${meta.go_loc != null ? ` · ${meta.go_loc} Go LOC` : ""}${meta.rust_loc != null ? ` · ${meta.rust_loc} Rust LOC` : ""}`;
 }
@@ -1942,8 +1972,7 @@ function renderSections(model) {
     const reviewed = behavior.filter((section) => filesReviewed(section) === sectionFiles(section).length).length;
     const list = el("div", "review-sections");
     list.append(el("p", "", `${countLabel(behavior.length, "behavior section")} · ${countLabel(data.represented_files, "changed file")} represented · ${countLabel(reviewed, "section")} with every file reviewed`),
-        el("p", "muted", `These are the analyzer's source-linked sections. Progress comes from whole-file decisions in the Review rail. AI analysis: ${data.analysis_status}. ${data.note}`));
-    const number = new Map(data.sections.map((section) => [section.id, section.number]));
+        el("p", "muted", `These are the analyzer's source-linked sections, shown inside the reading-path layers. Progress comes from whole-file decisions in the Review rail. AI analysis: ${data.analysis_status}. ${data.note}`));
     const focusLocation = state.sectionFocus;
     const focusedSection = focusLocation && (data.sections.find((section) => section.ranges.some((range) =>
         range.path === focusLocation.path && range.side === focusLocation.side
@@ -1953,8 +1982,27 @@ function renderSections(model) {
         "This source location has no changed section owner. Sections describe changed code, not every related dependency."));
     const query = state.query.toLowerCase();
     const matches = (section) => !query || `${section.title} ${section.summary} ${section.ranges.map((range) => range.path).join(" ")}`.toLowerCase().includes(query);
+    const navigation = layeredNavigation();
+    const layerIndex = new Map((navigation?.layers || []).map((layer, index) => [layer.id, index]));
+    const sectionLayer = (section) => {
+        const votes = new Map();
+        for (const range of section.ranges) {
+            const layer = layerOf(navigation, { path: range.path });
+            if (layer) votes.set(layer, (votes.get(layer) || 0) + 1);
+        }
+        return [...votes].sort((a, b) => b[1] - a[1] || layerIndex.get(a[0].id) - layerIndex.get(b[0].id))[0]?.[0] || null;
+    };
+    const ordered = behavior.filter(matches).map((section) => ({ section, layer: sectionLayer(section) }))
+        .sort((a, b) => (a.layer ? layerIndex.get(a.layer.id) : Infinity) - (b.layer ? layerIndex.get(b.layer.id) : Infinity)
+            || a.section.number - b.section.number);
+    const titles = new Map(data.sections.map((section) => [section.id, section.title]));
     let focused = null;
-    for (const section of behavior.filter(matches)) {
+    let currentLayer;
+    for (const { section, layer } of ordered) {
+        if (navigation && layer !== currentLayer) {
+            currentLayer = layer;
+            list.append(el("h3", "review-plan-layer", layer ? `Sections in ${layerLabel(layer)}` : "Sections outside the reading path"));
+        }
         const shownRanges = query && section.ranges.some((range) => range.path.toLowerCase().includes(query))
             ? section.ranges.filter((range) => range.path.toLowerCase().includes(query)) : section.ranges;
         const details = el("details", "section-card");
@@ -1967,7 +2015,13 @@ function renderSections(model) {
             if (details.open) state.openSectionKeys.add(section.id);
             else state.openSectionKeys.delete(section.id);
         });
-        const summary = el("summary", "", `${section.number}. ${section.title}`);
+        const summary = el("summary", "");
+        if (layer) {
+            const chip = el("span", "layer-chip layer-chip-inline", layer.number ? String(layer.number) : "·");
+            chip.title = layerLabel(layer);
+            summary.append(chip);
+        }
+        summary.append(document.createTextNode(section.title));
         details.append(summary, el("p", "muted", section.grouping || "Source-linked changed contract and consumers"),
             el("p", "", section.summary));
         if (section.summary_citations.length) {
@@ -1976,7 +2030,7 @@ function renderSections(model) {
                 { path: citation.path, line: citation.line, side: citation.side }));
         }
         for (const dependency of section.depends_on) {
-            const link = el("button", "link-button", `Depends on section ${number.get(dependency)}`);
+            const link = el("button", "link-button", `Depends on: ${titles.get(dependency) || "another section"}`);
             link.type = "button";
             link.addEventListener("click", () => {
                 const target = [...elements.graph.querySelectorAll(".section-card")].find((node) => node.dataset.sectionId === dependency);
@@ -2381,30 +2435,45 @@ function renderReviewOverview() {
     elements.review_overview.classList.toggle("hidden", Boolean(hidden));
     if (hidden) return;
     const target = payload.review_target;
-    const plan = overviewPlan();
     const progress = fileReviewProgress(model, state.reviewLedger);
     const next = nextFileReview(fileReviewQueue(), state.reviewLedger);
     const changed = (model.changes || []).filter((change) => change.status !== "unchanged").length;
     elements.overview_title.textContent = target?.intent?.subject || target?.intent?.title
         || (target?.mode === "worktree" ? "Review your uncommitted changes" : target?.label || "Review this change");
-    const blurb = overviewBlurb(payload.annotations?.overview?.body);
+    const overviewBody = payload.annotations?.overview?.body;
+    const blurb = overviewBlurb(overviewBody);
+    const fullBlurb = overviewBlurb(overviewBody, { full: true });
     elements.overview_description.replaceChildren();
     if (blurb) {
         elements.overview_description.append(el("p", "overview-copy-label muted", "AI change overview · verify against source"));
         markdownContext.intent = state.briefIntent || null;
         markdownContext.subject = null;
-        renderMarkdown(elements.overview_description, blurb);
+        const expandable = fullBlurb.length > blurb.length;
+        const expanded = expandable && state.overviewExpandedKey === overviewBody;
+        const text = el("div", "overview-copy");
+        renderMarkdown(text, expanded ? fullBlurb : blurb);
+        elements.overview_description.append(text);
+        if (expandable) {
+            const toggle = el("button", "link-button overview-more", expanded ? "Show less" : "Show more");
+            toggle.type = "button";
+            toggle.setAttribute("aria-expanded", String(expanded));
+            toggle.addEventListener("click", () => {
+                state.overviewExpandedKey = expanded ? null : overviewBody;
+                renderReviewOverview();
+                elements.overview_description.querySelector(".overview-more")?.focus({ preventScroll: true });
+            });
+            (text.lastElementChild || text).append(document.createTextNode(" "), toggle);
+        }
     } else {
         elements.overview_description.append(el("p", "", state.overviewLoading
             ? "The AI overview is being prepared. You can start with the saved code now."
             : state.overviewError ? "The AI overview is unavailable. You can review the saved code now, or open change details to retry."
                 : "Review the saved changes and available evidence. Open change details for intent, metrics and AI summary status."));
     }
-    elements.overview_progress.textContent = `${countLabel(changed, "changed file")} · ${progress.reviewed} reviewed · ${
-        progress.pending} not reviewed${progress.followUp ? ` · ${countLabel(progress.followUp, "follow-up")}` : ""}`;
-    elements.overview_scope.textContent = plan.omitted
-        ? `The focused queue shows ${plan.length} of ${plan.qualifying} qualifying priorities. All changed files remain available.`
-        : "Progress records explicit whole-file decisions. Priority/group decisions, AI analysis and executed tests remain separate.";
+    elements.overview_progress.textContent = `${progress.reviewed} of ${countLabel(changed, "changed file")} reviewed${
+        progress.followUp ? ` · ${countLabel(progress.followUp, "follow-up")}` : ""}`;
+    elements.overview_scope.textContent = "";
+    elements.overview_scope.classList.add("hidden");
     elements.overview_start.textContent = next
         ? state.savedReviewCursor || [...state.reviewLedger.values()].some((entry) => entry.disposition !== "pending") ? "Continue review" : "Start review"
         : "Review summary";
@@ -2425,8 +2494,7 @@ function renderReviewOverview() {
     elements.overview_files.textContent = `Browse all ${countLabel(changed, "file")}`;
     elements.review_progress_status.textContent = state.progressLoading ? "Restoring session progress…"
         : state.progressError ? `Progress unavailable: ${state.progressError}`
-            : state.progressReady ? state.progressDurable ? "Review decisions and reading point are saved in this session workspace."
-                : "This provider retains progress only in memory." : "";
+            : state.progressReady && !state.progressDurable ? "This provider retains progress only in memory." : "";
     elements.review_progress_retry.classList.toggle("hidden", !state.progressError);
     elements.review_progress_backup.classList.toggle("hidden", !state.progressLegacyCopy);
 }
@@ -2458,6 +2526,57 @@ elements.overview_start.addEventListener("click", async () => {
     } catch (error) { showError(error); }
 });
 elements.overview_files.addEventListener("click", browseReviewFiles);
+
+// The layer a piece of AI text refers to: an exact changed path, then a unique changed basename, then the longest changed symbol name.
+function textLayer(navigation, text) {
+    const model = state.payload?.model;
+    if (!navigation || !model) return null;
+    const changed = model.changes.filter((file) => file.status !== "unchanged").map((file) => file.path);
+    let path = changed.filter((candidate) => text.includes(candidate)).sort((a, b) => b.length - a.length)[0];
+    if (!path) {
+        const byName = changed.filter((candidate) => new RegExp(`(^|[^\\w.-])${candidate.split("/").at(-1).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^\\w-])`).test(text));
+        if (byName.length === 1) path = byName[0];
+    }
+    if (!path) {
+        const changedSet = new Set(changed);
+        path = model.nodes.filter((node) => node.change && node.change !== "unchanged" && changedSet.has(node.path)
+            && node.name?.length >= 4 && new RegExp(`\\b${node.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(text))
+            .sort((a, b) => b.name.length - a.name.length)[0]?.path;
+    }
+    return path ? layerOf(navigation, { path }) : null;
+}
+
+// The AI brief's "Review order" is a lens over the layered reading path, not a competing order.
+function alignFocusPoints(body) {
+    const heading = [...body.querySelectorAll("h2")].find((item) => /review order/i.test(item.textContent));
+    if (!heading) return;
+    heading.textContent = "Focus points";
+    const navigation = layeredNavigation();
+    const note = el("p", "muted brief-focus-note", navigation
+        ? "AI suggestions, sorted by reading-path layer. Verify in code; Review follows the layers."
+        : "AI suggestions. Verify in code; Review follows the reading path.");
+    heading.after(note);
+    if (!navigation) return;
+    const index = new Map(navigation.layers.map((layer, position) => [layer.id, position]));
+    for (const list of heading.parentElement.querySelectorAll("ul, ol")) {
+        const items = [...list.children].map((item, position) => ({ item, position, layer: textLayer(navigation, item.textContent) }));
+        items.sort((a, b) => (a.layer ? index.get(a.layer.id) : Infinity) - (b.layer ? index.get(b.layer.id) : Infinity) || a.position - b.position);
+        for (const { item, layer } of items) {
+            if (layer) {
+                const chip = el("span", "layer-chip layer-chip-inline", layer.number ? String(layer.number) : "·");
+                chip.title = layerLabel(layer);
+                chip.setAttribute("aria-label", `Layer ${layerLabel(layer)}`);
+                item.prepend(chip);
+            }
+            list.append(item);
+        }
+        if (list.tagName === "OL") {
+            const replacement = el("ul", list.className);
+            replacement.append(...list.children);
+            list.replaceWith(replacement);
+        }
+    }
+}
 
 function renderChangeBrief() {
     renderReviewOverview();
@@ -2565,6 +2684,7 @@ function renderChangeBrief() {
             section.append(child);
         }
         body.replaceChildren(...sections);
+        alignFocusPoints(body);
         panel.append(body);
     } else if (state.overviewLoading) {
         panel.append(aiPlaceholder("overview", "Copilot is summarizing the whole change…", 4));
@@ -2835,6 +2955,10 @@ async function loadSource(query, epoch, preferredTab = null, nav = "reset", extr
         : preferredTab || (source.diff ? "diff" : "current");
     recordSourceNavigation(nav, { query, extras, tab: state.sourceTab, label: `${source.path}${source.start_line ? `:${source.start_line}` : ""}` });
     if (!await renderSource() || epoch !== state.selectionEpoch) return false;
+    if (state.clientError) {
+        state.clientError = null;
+        if (!state.payload?.error) elements.error.classList.add("hidden");
+    }
     const side = elements.source_panel.querySelector(".source-side");
     side.scrollTop = 0;
     side.scrollLeft = 0;
@@ -3430,28 +3554,53 @@ function renderAnnotation(item, annotation, loading = false) {
     }
 }
 
+const ANALYSIS_NOTE_PAGE = 200;
+
 function analysisWarningList(warnings) {
     const list = el("ul", "analysis-warning-list");
-    for (const warning of warnings) {
-        const note = describeAnalysisWarning(warning, state.payload?.model);
-        const row = el("li", "analysis-warning-item");
-        const heading = el("div", "analysis-warning-heading");
-        heading.append(el("strong", "", note.kind));
-        if (note.subject) heading.append(el("code", "inline-code", note.subject));
-        if (note.snapshot) heading.append(el("span", "muted", note.snapshot));
-        if (note.framework) heading.append(el("span", "muted", note.framework));
-        row.append(heading);
-        if (note.reference) row.append(sourceReferenceButton(
-            `${note.reference.path}${note.reference.lines[0] ? `:${note.reference.lines[0]}` : ""}`, note.reference));
-        row.append(el("p", "analysis-warning-explanation", note.explanation || note.message));
-        if (note.explanation) {
-            const details = el("details", "analysis-warning-raw");
-            details.append(el("summary", "", "Analyzer detail"), el("p", "", note.raw));
-            row.append(details);
+    let shown = 0;
+    // Large repositories can carry tens of thousands of notes; render them in pages so opening the list stays instant.
+    const appendPage = () => {
+        list.querySelector(".analysis-warning-more")?.remove();
+        const end = Math.min(warnings.length, shown + ANALYSIS_NOTE_PAGE);
+        for (const warning of warnings.slice(shown, end)) list.append(analysisWarningItem(warning));
+        shown = end;
+        if (shown < warnings.length) {
+            const more = el("li", "analysis-warning-more");
+            const button = el("button", "link-button", `Show ${Math.min(ANALYSIS_NOTE_PAGE, warnings.length - shown).toLocaleString()} more of ${(warnings.length - shown).toLocaleString()} remaining notes`);
+            button.type = "button";
+            button.addEventListener("click", () => {
+                const first = shown;
+                appendPage();
+                list.children[first]?.focus({ preventScroll: false });
+            });
+            more.append(button);
+            list.append(more);
         }
-        list.append(row);
-    }
+    };
+    appendPage();
     return list;
+}
+
+function analysisWarningItem(warning) {
+    const note = describeAnalysisWarning(warning, state.payload?.model);
+    const row = el("li", "analysis-warning-item");
+    const heading = el("div", "analysis-warning-heading");
+    heading.append(el("strong", "", note.kind));
+    if (note.subject) heading.append(el("code", "inline-code", note.subject));
+    if (note.snapshot) heading.append(el("span", "muted", note.snapshot));
+    if (note.framework) heading.append(el("span", "muted", note.framework));
+    row.append(heading);
+    if (note.reference) row.append(sourceReferenceButton(
+        `${note.reference.path}${note.reference.lines[0] ? `:${note.reference.lines[0]}` : ""}`, note.reference));
+    row.append(el("p", "analysis-warning-explanation", note.explanation || note.message));
+    if (note.explanation) {
+        const details = el("details", "analysis-warning-raw");
+        details.append(el("summary", "", "Analyzer detail"), el("p", "", note.raw));
+        row.append(details);
+    }
+    row.tabIndex = -1;
+    return row;
 }
 
 function renderDetail(item) {
@@ -4060,7 +4209,7 @@ function collectionTitle(mode) {
     if (mode === "areas") return state.areaGroup?.title || "Large change areas";
     return {
         impact: "Change impact", sections: "Review sections",
-        walkthrough: "Risk-first walkthrough",
+        walkthrough: "Attention",
         files: "Changed files", lines: "Lines changed by file", symbols: "Changed symbols",
         edges: "New relationships", packages: "Package changes", findings: "Ranked findings",
         decisions: "Code path changes",
@@ -4096,13 +4245,12 @@ function renderReviewPlan(model, findings) {
     const plan = allPlan
         .filter((item) => !query || `${item.title} ${item.path || ""} ${item.reasons.join(" ")}`.toLowerCase().includes(query));
     const progress = reviewProgress(allPlan, state.reviewLedger);
-    const next = nextReviewItem(allPlan, state.reviewLedger);
     const view = el("div", "collection-list review-plan");
     const intro = el("section", "review-plan-intro");
     const introCopy = el("div", "");
     introCopy.append(
-        el("strong", "", "Focused review"),
-        el("p", "muted", "Only changes that cross absolute impact, churn, caller-reach, dependency, or untested-behavior thresholds appear here."),
+        el("strong", "", "Attention"),
+        el("p", "muted", "Changes that cross impact, churn, caller-reach, dependency or untested-behavior thresholds, shown in reading-path layer order and by priority within each layer. Review follows the layers; this is a lens, not a second order."),
     );
     if (progress.total) {
         introCopy.append(el("p", "review-progress",
@@ -4111,55 +4259,64 @@ function renderReviewPlan(model, findings) {
                 allPlan.omitted ? ` · ${countLabel(allPlan.omitted, "additional qualifying change")} omitted` : ""}`));
     }
     intro.append(introCopy);
-    if (allPlan.length) {
-        const start = el("button", "review-next", next ? "Review next" : "Review complete");
-        start.type = "button";
-        start.disabled = !next;
-        if (next) start.addEventListener("click", () => openReviewPlanItem(next));
-        intro.append(start);
-    }
     view.append(intro);
     if (!plan.length) {
         view.append(el("p", "collection-empty", query
-            ? "No focused review items match this filter."
-            : "No changes crossed the focused review thresholds. Use Architecture, Files, or Code paths for exhaustive inspection."));
+            ? "No attention items match this filter."
+            : "No changes crossed the attention thresholds. Use the reading path, Architecture, Files, or Code paths for exhaustive inspection."));
         elements.graph.replaceChildren(view);
         return;
     }
+    const navigation = layeredNavigation();
+    const buckets = new Map((navigation?.layers || []).map((layer) => [layer.id, []]));
+    const unplaced = [];
+    for (const item of plan) {
+        const layer = item.path && layerOf(navigation, { path: item.path });
+        (layer ? buckets.get(layer.id) : unplaced).push(item);
+    }
+    const sections = [...(navigation?.layers || []).map((layer) => [layer, buckets.get(layer.id)]), [null, unplaced]]
+        .filter(([, items]) => items.length);
     const dispositionLabels = Object.fromEntries(REVIEW_DISPOSITIONS);
-    for (const [index, item] of plan.entries()) {
-        const record = state.reviewLedger.get(item.id);
-        const disposition = effectiveDisposition(item, state.reviewLedger);
-        const row = el("button", "review-plan-row");
-        row.type = "button";
-        row.dataset.reviewId = item.id;
-        row.dataset.disposition = disposition;
-        row.classList.toggle("is-reviewed", isReviewComplete(disposition));
-        row.classList.toggle("needs-follow-up", disposition === "follow-up");
-        const copy = el("span", "review-plan-copy");
-        const heading = el("span", "review-plan-heading");
-        heading.append(el("strong", "", item.title));
-        const badges = el("span", "review-plan-badges");
-        if (disposition !== "pending") badges.append(el("span", `review-disposition disposition-${disposition}`, dispositionLabels[disposition]));
-        badges.append(el("b", "impact-score", `Priority ${item.score}/100`));
-        heading.append(badges);
-        copy.append(heading);
-        if (item.path) copy.append(el("span", "review-plan-path", `${item.path}${item.line ? `:${item.line}` : ""}`));
-        if (record?.note) {
-            const note = el("span", "review-plan-note", `${record.path}${record.line ? `:${record.line}` : ""} · ${record.note}`);
-            copy.append(note);
+    for (const [layer, items] of sections) {
+        if (sections.length > 1 || layer) {
+            view.append(el("h3", "review-plan-layer", layer ? layerLabel(layer) : "Outside the reading path"));
         }
-        const reasons = el("span", "review-plan-reasons");
-        for (const reason of item.reasons) reasons.append(el("span", "", reason));
-        copy.append(reasons);
-        const proof = el("span", "review-plan-proof");
-        if (item.evidence.untested) proof.append(el("span", "proof-untested", `${item.evidence.untested} untested`));
-        if (item.evidence.inferred) proof.append(el("span", "proof-inferred", `${item.evidence.inferred} inferred`));
-        if (item.evidence.confirmed) proof.append(el("span", "proof-confirmed", `${item.evidence.confirmed} confirmed`));
-        if (proof.childElementCount) copy.append(proof);
-        row.append(el("span", "review-rank", String(index + 1)), copy, el("span", "review-plan-open", "Review →"));
-        row.addEventListener("click", () => openReviewPlanItem(item));
-        view.append(row);
+        for (const item of items.sort((a, b) => b.score - a.score)) {
+            const record = state.reviewLedger.get(item.id);
+            const disposition = effectiveDisposition(item, state.reviewLedger);
+            const row = el("button", "review-plan-row");
+            row.type = "button";
+            row.dataset.reviewId = item.id;
+            row.dataset.disposition = disposition;
+            row.classList.toggle("is-reviewed", isReviewComplete(disposition));
+            row.classList.toggle("needs-follow-up", disposition === "follow-up");
+            const copy = el("span", "review-plan-copy");
+            const heading = el("span", "review-plan-heading");
+            heading.append(el("strong", "", item.title));
+            const badges = el("span", "review-plan-badges");
+            if (disposition !== "pending") badges.append(el("span", `review-disposition disposition-${disposition}`, dispositionLabels[disposition]));
+            badges.append(el("b", "impact-score", `Priority ${item.score}/100`));
+            heading.append(badges);
+            copy.append(heading);
+            if (item.path) copy.append(el("span", "review-plan-path", `${item.path}${item.line ? `:${item.line}` : ""}`));
+            if (record?.note) {
+                const note = el("span", "review-plan-note", `${record.path}${record.line ? `:${record.line}` : ""} · ${record.note}`);
+                copy.append(note);
+            }
+            const reasons = el("span", "review-plan-reasons");
+            for (const reason of item.reasons) reasons.append(el("span", "", reason));
+            copy.append(reasons);
+            const proof = el("span", "review-plan-proof");
+            if (item.evidence.untested) proof.append(el("span", "proof-untested", `${item.evidence.untested} untested`));
+            if (item.evidence.inferred) proof.append(el("span", "proof-inferred", `${item.evidence.inferred} inferred`));
+            if (item.evidence.confirmed) proof.append(el("span", "proof-confirmed", `${item.evidence.confirmed} confirmed`));
+            if (proof.childElementCount) copy.append(proof);
+            const chip = el("span", "layer-chip", layer ? layer.number ? String(layer.number) : "·" : "–");
+            chip.title = layer ? layerLabel(layer) : "Outside the reading path";
+            row.append(chip, copy, el("span", "review-plan-open", "Open →"));
+            row.addEventListener("click", () => openReviewPlanItem(item));
+            view.append(row);
+        }
     }
     elements.graph.replaceChildren(view);
 }
@@ -5442,10 +5599,13 @@ function renderView() {
     elements.sections_view.disabled = !model || Boolean(payload.loading);
     const worktreeNotice = !state.reviewPickerPending && !state.reviewSubmitting && !payload?.loading
         && payload?.review_target?.mode === "worktree" && (payload.worktree_changed || payload.worktree_check_error);
-    elements.worktree_notice.classList.toggle("hidden", !worktreeNotice);
+    // Freshness is one header chip; its explanation is disclosed on demand and the header Reanalyze is the single action.
+    elements.worktree_notice.classList.toggle("hidden", !worktreeNotice || !state.freshnessOpen);
     elements.worktree_notice_text.textContent = payload?.worktree_check_error
-        || "Worktree changed since this review. Reanalyze to include the latest edits.";
-    elements.worktree_reanalyze.disabled = Boolean(payload?.loading || state.connectionLost);
+        || "Worktree changed since this review. Use Reanalyze in the header to include the latest edits.";
+    elements.status.setAttribute("aria-disabled", String(!worktreeNotice));
+    elements.status.setAttribute("aria-expanded", String(Boolean(worktreeNotice && state.freshnessOpen)));
+    elements.refresh.classList.toggle("needs-attention", Boolean(worktreeNotice));
     elements.repository_identity.textContent = model?.metadata?.repo_root
         ? `${model.metadata.repo_root} · ${state.reviewPickerPending ? "Choose a comparison" : `Base ${model.metadata.base_sha?.slice(0, 8) || "empty tree"}`}` : payload?.repo_root || "";
     elements.change_repository.disabled = Boolean(payload?.loading || state.repositorySubmitting || state.connectionLost);
@@ -5464,8 +5624,10 @@ function renderView() {
     elements.cancel_analysis.textContent = state.cancelling ? "Cancelling…" : "Cancel";
     elements.analysis_cancelled.classList.toggle("hidden", !payload?.cancelled);
     updateReviewApply();
-    elements.error.classList.toggle("hidden", !payload?.error);
-    elements.error.textContent = payload?.error || "";
+    // Background re-renders must not erase a client-side warning; it stays until the user opens other source or the review changes.
+    const clientError = state.clientError?.generation === payload?.review_generation ? state.clientError.message : null;
+    elements.error.classList.toggle("hidden", !payload?.error && !clientError);
+    elements.error.textContent = payload?.error || clientError || "";
     elements.analysis_progress.classList.toggle("hidden", !payload?.loading || state.connectionLost);
     if (payload?.loading) {
         const percent = Math.max(0, Math.min(100, Number(progress?.percent || 0)));
@@ -5576,7 +5738,7 @@ function renderView() {
         renderImpact(model);
     } else if (state.mode === "walkthrough") {
         elements.level_label.textContent = "REVIEW PLAN";
-        elements.graph_title.textContent = "Risk-first walkthrough";
+        elements.graph_title.textContent = "Attention";
         renderReviewPlan(model, groupedObservations);
     } else if (state.mode === "graph") {
         elements.level_label.textContent = parent ? (parent.kind === "component" ? "MODULES" : "SYMBOLS") : "ARCHITECTURE";
@@ -5652,6 +5814,7 @@ function showError(error) {
     }
     elements.error.textContent = error.message;
     elements.error.classList.remove("hidden");
+    state.clientError = { message: error.message, generation: state.payload?.review_generation };
     renderWorkspaceShell();
 }
 
@@ -5663,7 +5826,11 @@ async function reanalyze() {
     }
 }
 elements.refresh.addEventListener("click", reanalyze);
-elements.worktree_reanalyze.addEventListener("click", reanalyze);
+elements.status.addEventListener("click", () => {
+    if (elements.status.getAttribute("aria-disabled") === "true") return;
+    state.freshnessOpen = !state.freshnessOpen;
+    render();
+});
 elements.cancel_analysis.addEventListener("click", async () => {
     state.cancelling = true;
     render();
@@ -5995,9 +6162,11 @@ function resetReviewNavigation() {
 function renderReviewPickerNotice() {
     const pending = Boolean(state.reviewPickerPending || state.reviewSubmitting
         || (state.payload?.loading && !state.payload.model));
-    for (const element of [elements.review_overview, elements.review_background, elements.change_brief, elements.summary, elements.breadcrumbs, document.querySelector(".workspace")]) {
+    for (const element of [elements.review_overview, elements.review_background, elements.change_brief, elements.summary, document.querySelector(".workspace")]) {
         element.classList.toggle("hidden", pending);
     }
+    // renderBreadcrumbs owns their visibility once a review is open; the picker only hides them.
+    if (pending) elements.breadcrumbs.classList.add("hidden");
     const loading = state.reviewSubmitting || state.reviewOptionsLoading || state.payload?.loading;
     elements.review_picker_notice.classList.toggle("hidden", !pending || (loading && !state.reviewOpenError));
     if (pending) {
@@ -6144,6 +6313,7 @@ async function openSelectedReview() {
         elements.source_panel.classList.add("hidden");
         elements.session_history_panel.classList.add("hidden");
         state.payload = await api("/api/state");
+        state.clientError = null;
         elements.error.classList.add("hidden");
         render();
         window.scrollTo({ top: 0, behavior: "instant" });
@@ -6240,7 +6410,6 @@ function renderConnectionNotice() {
         elements.status.classList.add("working");
         elements.analysis_progress.classList.add("hidden");
         elements.refresh.disabled = true;
-        elements.worktree_reanalyze.disabled = true;
         elements.cancel_analysis.disabled = true;
         updateReviewApply();
     }
