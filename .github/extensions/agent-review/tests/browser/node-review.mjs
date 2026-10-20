@@ -113,8 +113,8 @@ try {
         await page.locator("#summary .metric").first().waitFor();
         await page.locator(".review-plan-row").first().waitFor();
         assert.match(await page.locator(".review-plan-row").first().textContent(), /resolveReference/);
-        assert.match(await page.locator(".quality-warning").textContent(), /source-matched LCOV\/Istanbul JSON/);
-        assert.doesNotMatch(await page.locator(".quality-warning").textContent(), /Generate coverage\.json or coverage\.xml/);
+        assert.match(await page.locator("#overview-limitation").textContent(), /source-matched LCOV\/Istanbul JSON/);
+        assert.doesNotMatch(await page.locator("#overview-limitation").textContent(), /Generate coverage\.json or coverage\.xml/);
         await page.locator("#zoom-out").click();
         assert.ok(await page.locator("#graph .node").count() > 0, "actual structural graph is rendered");
         await page.screenshot({ path: join(artifacts, `node-${theme}-graph.png`), fullPage: true });
@@ -141,8 +141,8 @@ try {
         }
         await page.locator("#source-close").click();
         if (theme === "light") {
-            await page.getByRole("button", { name: "Review plan", exact: true }).click();
-            assert.match(await page.locator(".review-progress").textContent(), /0 of \d+ reviewed · 1 needs follow-up/);
+            await page.locator("#breadcrumbs").getByRole("button", { name: "Attention", exact: true }).click();
+            assert.match(await page.locator(".review-progress").textContent(), /0 of \d+ attention items covered .* · 1 item needs follow-up/);
             assert.match(await page.locator('.review-plan-row[data-disposition="follow-up"]').textContent(),
                 /Exercise the legacy-reference error branch/);
         }

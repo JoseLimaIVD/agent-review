@@ -29,7 +29,7 @@ test("handoff defaults contain decisions and evidence limits, never source, tran
     assert.deepEqual(result.artifact.scope, [{ path: "a.js", status: "modified" }]);
     assert.match(result.markdown, /6 passed, 1 failed, 2 error.*STALE/);
     assert.match(result.markdown, /outcomes are not per-path proof/);
-    assert.match(result.markdown, /0\/1 changed files marked reviewed; 0 pending; 1 need follow-up/);
+    assert.match(result.markdown, /0\/1 changed files marked reviewed; 0 not reviewed; 1 need follow-up/);
     assert.doesNotMatch(result.markdown, /<script>/);
     assert.match(result.markdown, /not a self-contained source archive/);
     assert.throws(() => validateHandoffImport({ ...result.artifact, entries: undefined }, modelFor(), target), /must be an object/);

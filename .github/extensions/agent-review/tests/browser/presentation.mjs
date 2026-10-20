@@ -104,7 +104,7 @@ try {
             }, { variable: token, property });
             assert.ok(colors.every((color) => color.actual === color.expected), `${theme}: ${selector} uses its semantic color`);
         }
-        assert.match(await page.locator(".quality-warning").textContent(), /Coverage unavailable.*Provide Python coverage\.json\/coverage\.xml/);
+        assert.match(await page.locator("#overview-limitation").textContent(), /Coverage unavailable.*Provide Python coverage\.json\/coverage\.xml/);
         const tiles = await page.locator("#summary .metric").evaluateAll((cards) => {
             const probe = document.createElement("span");
             probe.style.color = "var(--cp-text-muted)";
@@ -309,8 +309,8 @@ try {
 
     await cachePage.locator("#change-brief .brief-ai").waitFor();
     assert.equal(state.reviewTarget.mode, "commit");
-    assert.match(await cachePage.locator(".quality-warning").textContent(), /historical snapshot.*not applied to commit or PR/);
-    assert.doesNotMatch(await cachePage.locator(".quality-warning").textContent(), /1 analyzer warning/);
+    assert.match(await cachePage.locator("#overview-limitation").textContent(), /historical snapshot.*not applied to commit or PR/);
+    assert.doesNotMatch(await cachePage.locator("#overview-limitation").textContent(), /1 analyzer warning/);
     const cachedSummaries = summaries;
     await cachePage.selectOption("#review-mode", "worktree");
     await cachePage.waitForFunction(() => document.querySelector("#status").textContent === "Saved review");

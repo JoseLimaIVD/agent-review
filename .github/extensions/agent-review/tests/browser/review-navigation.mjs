@@ -63,7 +63,8 @@ try {
         await page.locator("#source .focus-start").waitFor();
         assert.equal(await page.locator("#source-title").textContent(), `${path}:${target.line}`);
         assert.equal(await page.locator("#source .focus-start").getAttribute(target.side === "base" ? "data-old-line" : "data-new-line"), String(target.line));
-        for (const key of ["j", "k"]) {
+        // J twice then K: stepping back must return to the earlier concern (wrap-around may land on a path-less aggregate).
+        for (const key of ["j", "j", "k"]) {
             await page.locator("#source").focus();
             const response = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/source");
             await page.keyboard.press(key);

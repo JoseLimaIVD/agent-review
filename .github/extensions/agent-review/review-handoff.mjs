@@ -39,7 +39,7 @@ export function createReviewHandoff(model, target, progress, { testRun, warnings
         `Target: ${text(target.label || target.mode)} (${code(target.mode)})`,
         `Base: ${code(model.metadata.base_sha)} · Head: ${code(model.metadata.head_sha)}`,
         `Saved source identity: ${code(identity)}`, "", "## Human review",
-        `${counts.reviewed}/${counts.total} changed files marked reviewed; ${counts.pending} pending; ${counts.followUp} need follow-up.`,
+        `${counts.reviewed}/${counts.total} changed files marked reviewed; ${counts.pending} not reviewed; ${counts.followUp} need follow-up.`,
         "Human decisions do not prove correctness, resolve findings, complete AI analysis, or establish test coverage.", "",
         "## File decisions and follow-ups"];
     lines.push(`Exported: ${artifact.exported_at} · Saved decision revision: ${progress.revision ?? 0}`);
@@ -53,7 +53,8 @@ export function createReviewHandoff(model, target, progress, { testRun, warnings
     });
     for (const file of ranked.slice(0, 40)) {
         const entry = entries.get(fileReviewId(file.path));
-        lines.push(`- ${text(entry?.disposition || "pending")} · ${code(file.path)}${entry?.line ? `:${entry.line}` : ""}${entry?.note ? ` — ${text(entry.note)}` : ""}`);
+        const disposition = entry?.disposition || "pending";
+        lines.push(`- ${text(disposition === "pending" ? "not reviewed" : disposition)} · ${code(file.path)}${entry?.line ? `:${entry.line}` : ""}${entry?.note ? ` — ${text(entry.note)}` : ""}`);
     }
     if (!ranked.length) lines.push("- No explicit whole-file decisions recorded.");
     if (ranked.length > 40) lines.push(`- ${ranked.length - 40} additional file decisions omitted; JSON contains every recorded decision.`);
@@ -70,7 +71,8 @@ export function createReviewHandoff(model, target, progress, { testRun, warnings
         const pendingPaths = new Set(pending.map((file) => file.path));
         for (const layer of layers) {
             const reviewed = layer.files.filter((path) => entries.get(fileReviewId(path))?.disposition === "reviewed").length;
-            lines.push("", `### ${layer.number ? `${layer.number}. ` : ""}${text(layer.name)} — ${reviewed}/${layer.files.length} reviewed`);
+            lines.push("", `### ${layer.number ? `${layer.number}. ` : ""}${text(layer.title || layer.name)} — ${reviewed}/${layer.files.length} reviewed`);
+            if (layer.title && layer.title !== layer.name) lines.push(`Area: ${text(layer.name)} · step title is AI-written`);
             if (layer.intent) lines.push(`AI summary (verify in code): ${text(layer.intent)}`);
             else if (layer.summary) lines.push(text(layer.summary));
             const remaining = layer.files.filter((path) => pendingPaths.has(path));

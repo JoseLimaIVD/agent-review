@@ -68,7 +68,7 @@ try {
         await page.goto(`${server.url}?scoutTheme=${theme}`);
         await page.locator("#summary .metric").first().waitFor();
         assert.match(await page.locator("#summary").getAttribute("title"), /Rust LOC/);
-        assert.match(await page.locator(".quality-warning").textContent(), /rust-coverage\.json/);
+        assert.match(await page.locator("#overview-limitation").textContent(), /rust-coverage\.json/);
         await page.locator("#zoom-out").click();
         assert.ok(await page.locator("#graph .node").count() > 0);
         await page.locator(`.node[aria-label^="${component.name},"]`).click();

@@ -60,7 +60,7 @@ const elements = Object.fromEntries([
     "source-coverage", "overview-layers", "overview-stats", "overview-limitation",
     "review-target-form", "review-mode", "review-ref", "review-target-label", "repository-identity", "review-list-refresh", "review-more", "review-options-status", "review-picker-notice", "clean-review", "change-brief",
     "review-overview", "review-background", "overview-title", "overview-description", "overview-progress", "overview-scope", "overview-start", "overview-files",
-    "review-workflow", "workflow-overview", "workflow-review", "workflow-finish", "review-finish", "workspace-target", "workspace-find", "workspace-nav-toggle",
+    "review-workflow", "workflow-overview", "workflow-review", "workflow-finish", "review-finish", "workspace-target", "workspace-freshness", "workspace-find", "workspace-nav-toggle",
     "workspace-return-source", "review-navigation", "workspace-groups", "workspace-files", "workspace-search", "workspace-count",
     "workspace-nav-list", "workspace-code", "workspace-context", "workspace-group-label", "workspace-group-retry",
     "workspace-discuss", "source-review-context", "source-origin",
@@ -109,8 +109,8 @@ function renderWorkspaceShell() {
     document.body.classList.toggle("reviewing", reviewing);
     document.body.classList.toggle("reading-source", reviewing && !elements.source_panel.classList.contains("hidden"));
     document.body.classList.toggle("workspace-exploring", Boolean(state.exploring));
-    elements.source_section.textContent = reviewing && !state.exploring ? "Layer" : "Section";
-    elements.source_section.title = reviewing && !state.exploring ? "Show this file's layer in the reading path" : "Show the analyzer section for this code";
+    elements.source_section.textContent = "Layer";
+    elements.source_section.title = reviewing && !state.exploring ? "Show this file's layer in the reading path" : "Show this code's section within its layer";
     document.body.dataset.readingPane = state.readingPane;
     elements.workflow_overview.setAttribute("aria-current", state.reviewPage === "overview" ? "page" : "false");
     elements.workflow_review.setAttribute("aria-current", reviewing ? "page" : "false");
@@ -207,7 +207,8 @@ elements.workflow_overview.addEventListener("click", () => {
     state.reviewPage = "overview";
     state.navigationOpen = false;
     elements.source_panel.classList.add("hidden");
-    renderWorkspaceShell();
+    render();
+    flushReviewCursor();
     elements.overview_start.focus({ preventScroll: true });
 });
 elements.workflow_review.addEventListener("click", () => {
@@ -288,7 +289,7 @@ const reviewStateLabel = (value) => Object.fromEntries(REVIEW_DISPOSITIONS)[valu
 // One grounded AI intent line per layer; the deterministic summary stays visible until it arrives or if it fails.
 function ensureLayerSummaries() {
     const generation = state.payload?.review_generation;
-    if (!state.payload || state.payload.annotations?.layers || state.layerSummaryRequested === generation) return;
+    if (!state.payload || state.payload.annotations?.layers?.titles || state.layerSummaryRequested === generation) return;
     state.layerSummaryRequested = generation;
     api("/api/layer-summaries", { method: "POST", body: "{}" }).then((result) => {
         if (state.payload?.review_generation !== generation) return;
@@ -332,7 +333,7 @@ function renderWorkspaceNavigation() {
     const layer = group && navigation.layers.find((item) => item.id === group.layer);
     const groupLabel = group?.label || group?.title;
     elements.workspace_group_label.textContent = group ? `${layer && navigation.layers.length > 1
-        ? `${layer.number ? `${layer.number}. ` : ""}${layer.name}${groupLabel === layer.name ? "" : " › "}` : ""}${groupLabel === layer?.name && navigation.layers.length > 1 ? "" : groupLabel}`
+        ? `${layerLabel(layer)}${groupLabel === layer.name ? "" : " › "}` : ""}${groupLabel === layer?.name && navigation.layers.length > 1 ? "" : groupLabel}`
         : (changedFile ? "Changed file · this line is outside its grouped change ranges"
             : state.source ? "Related source outside the changed-file groups" : "Choose a group or file");
     const query = state.navigationQuery.toLowerCase().trim();
@@ -371,7 +372,7 @@ function renderWorkspaceNavigation() {
             appendTree(list, fileTree(navigation.files.filter((file) => !query || file.path.toLowerCase().includes(query))), null);
         } else for (const layer of navigation.layers) {
             const layerGroups = layer.groups.map((entry) => {
-                const matches = !query || `${entry.label} ${layer.name}`.toLowerCase().includes(query);
+                const matches = !query || `${entry.label} ${layer.name} ${layerTitle(layer)}`.toLowerCase().includes(query);
                 return { entry, files: entry.files.filter((file) => matches || file.path.toLowerCase().includes(query)) };
             }).filter(({ files }) => files.length);
             if (!layerGroups.length) continue;
@@ -380,11 +381,23 @@ function renderWorkspaceNavigation() {
             section.dataset.layer = layer.id;
             const heading = el("summary", "workspace-layer-heading");
             const name = el("span", "workspace-layer-name");
-            name.append(el("span", "workspace-layer-number", layer.number ? String(layer.number) : "·"), el("strong", "", layer.name));
+            const title = layerTitle(layer);
+            name.append(el("span", "workspace-layer-number", layer.number ? String(layer.number) : "·"), el("strong", "", title));
+            if (title !== layer.name) {
+                const badge = el("span", "workspace-layer-ai", "AI");
+                badge.title = "AI-written step title; the area name is shown below";
+                name.append(badge);
+            }
             const meta = el("span", "workspace-layer-meta");
+            if (title !== layer.name) meta.append(el("span", "", layer.name));
             if (layer.path && layer.path !== "/" && !layer.supporting) meta.append(el("code", "", layer.path));
+            if (layer.number && layer.number > 1 && !layer.dependsOn.length) {
+                const independent = el("span", "layer-independent", "independent");
+                independent.title = "No changed file in this layer imports or calls an earlier layer; it can be read in any order.";
+                meta.append(independent);
+            }
             for (const dependency of layer.dependsOn) {
-                meta.append(el("span", "workspace-layer-depends", `builds on ${dependency.number}. ${dependency.name} — ${dependency.example}`));
+                meta.append(el("span", "workspace-layer-depends", `builds on ${dependencyLabel(navigation, dependency)} — ${dependency.example}`));
             }
             const progress = el("span", "workspace-layer-progress muted");
             progress.dataset.layerProgress = layer.id;
@@ -1054,12 +1067,9 @@ function renderSummary(model) {
             }
             setDetailVisible(true);
             renderDetail(state.selected);
+            elements.detail.tabIndex = -1;
+            elements.detail.focus({ preventScroll: true });
         };
-        const quality = el("button", "quality-warning");
-        quality.type = "button";
-        quality.append(el("strong", "", title), el("span", "", qualityIssues.join(" ")));
-        quality.addEventListener("click", openLimitations);
-        elements.summary.append(quality);
         const details = el("button", "link-button", "Details");
         details.type = "button";
         details.addEventListener("click", openLimitations);
@@ -1168,6 +1178,13 @@ function renderCards(container, items, emptyText) {
             const closed = isFindingClosed(item, state.closedFindingKeys);
             const wrapper = el("div", `queue-item${closed ? " is-closed" : ""}`);
             wrapper.dataset.itemId = item.id;
+            const layer = layerOf(layeredNavigation(), { path: concernPath(item) });
+            if (layer) {
+                wrapper.dataset.layer = layer.id;
+                const chip = el("span", "layer-chip layer-chip-inline", layer.number ? String(layer.number) : "·");
+                chip.title = layerLabel(layer);
+                heading.prepend(chip);
+            }
             const toggle = el("button", "queue-toggle", closed ? "Reopen" : "Close");
             toggle.type = "button";
             toggle.setAttribute("aria-label", `${closed ? "Reopen" : "Close"} ${item.title || item.name}`);
@@ -1190,6 +1207,40 @@ function renderCards(container, items, emptyText) {
         } else {
             container.append(card);
         }
+    }
+    if (container === elements.attention) groupConcernsByLayer(container);
+}
+
+function concernPath(item) {
+    const model = state.payload?.model;
+    if (item.path) return item.path;
+    if (state.nodePathModel !== model) {
+        state.nodePathModel = model;
+        state.nodePaths = new Map((model?.nodes || []).map((entry) => [entry.id, entry.path]));
+    }
+    const nodePath = item.node_id && state.nodePaths.get(item.node_id);
+    if (nodePath) return nodePath;
+    const pkg = (model?.package_changes || []).find((entry) => entry.id === (item.package_id || item.id));
+    return pkg && (pkg.declared_current?.[0]?.source || pkg.declared_base?.[0]?.source) || null;
+}
+
+// Concerns read in reading-path layer order, keeping their impact order within each layer.
+function groupConcernsByLayer(container) {
+    const navigation = layeredNavigation();
+    if (!navigation) return;
+    const items = [...container.querySelectorAll(":scope > .queue-item")];
+    const order = new Map(navigation.layers.map((layer, index) => [layer.id, index]));
+    const rank = (item) => item.dataset.layer ? order.get(item.dataset.layer) : Infinity;
+    const sorted = items.map((item, index) => ({ item, index })).sort((a, b) => rank(a.item) - rank(b.item) || a.index - b.index);
+    let current;
+    for (const { item } of sorted) {
+        const layer = item.dataset.layer || "";
+        if (layer !== current) {
+            current = layer;
+            const match = navigation.layers.find((entry) => entry.id === layer);
+            container.append(el("h3", "review-plan-layer", match ? layerLabel(match) : "Outside the reading path"));
+        }
+        container.append(item);
     }
 }
 
@@ -1288,6 +1339,13 @@ function cacheReviewLedger() {
     return true;
 }
 
+// A saved cursor may only name an item that belongs to the file it points at; otherwise resuming would mix two places.
+function cursorItemId(item, path) {
+    const id = item?.id;
+    if (!id || (item.path && item.path !== path) || (id.startsWith("file:") && id !== `file:${path}`)) return null;
+    return id;
+}
+
 function currentReviewCursor() {
     const source = state.source || state.workspaceReturn?.source;
     if (!source?.path) return state.savedReviewCursor || null;
@@ -1295,7 +1353,27 @@ function currentReviewCursor() {
     return { path: source.path, line: viewed?.line || Number(source.start_line) || 1,
         side: viewed?.side || source.focus_side || (source.current === null ? "base" : "current"),
         tab: state.source ? state.sourceTab : state.workspaceReturn.tab,
-        item_id: (source.reviewItem || state.selected || state.workspaceReturn?.selected)?.id || null, group: state.activeReviewGroup || null };
+        item_id: cursorItemId(source.reviewItem || state.selected || state.workspaceReturn?.selected, source.path), group: state.activeReviewGroup || null };
+}
+
+// Where the reader actually is: the source they just left (not yet autosaved) before the last saved position.
+function liveReviewCursor() {
+    const saved = state.workspaceReturn;
+    if (saved?.generation !== state.payload?.review_generation || !saved.source?.path) return state.savedReviewCursor || null;
+    const source = saved.source;
+    return { path: source.path, line: saved.cursor?.line || Number(source.start_line) || 1,
+        side: saved.cursor?.side || source.focus_side || (source.current === null ? "base" : "current"),
+        tab: saved.tab, item_id: cursorItemId(saved.selected, source.path), group: saved.group || null, live: true };
+}
+
+// Leaving Review saves the reading point immediately so labels, Finish and a reload all agree.
+function flushReviewCursor() {
+    clearTimeout(state.cursorSaveTimer);
+    const cursor = liveReviewCursor();
+    if (!cursor?.live || !state.progressReady || state.progressSaving) return;
+    const { live, ...stored } = cursor;
+    if (JSON.stringify(stored) === JSON.stringify(state.savedReviewCursor)) return;
+    persistReviewEntries(new Map(state.reviewLedger), stored, { quiet: true }).then((saved) => { if (saved) renderReviewOverview(); });
 }
 
 async function persistReviewEntries(entries, cursor = currentReviewCursor(), { quiet = false } = {}) {
@@ -1398,6 +1476,12 @@ async function openFileReview(entry) {
     await openWorkspaceFile(entry.file || entry, group);
 }
 
+async function openOverviewDestination(destination) {
+    if (destination?.resume?.live && state.workspaceReturn?.source?.path === destination.path) await returnWorkspaceSource({ code: true });
+    else if (destination?.resume) await resumeReviewCursor(destination.resume);
+    else await openFileReview(destination?.entry || null);
+}
+
 async function resumeReviewCursor(cursor) {
     const model = state.payload?.model;
     if (!cursor || !Object.hasOwn(model.source_files || {}, cursor.path)) throw new Error("The saved reading point is unavailable in this snapshot.");
@@ -1410,7 +1494,8 @@ async function resumeReviewCursor(cursor) {
         if (section) item = { id: section.id, kind: "section", title: section.title, path: cursor.path };
     }
     if (!item && model.evidence?.[cursor.item_id]) item = { id: cursor.item_id, kind: "evidence", path: cursor.path };
-    if (!item && cursor.item_id && cursor.item_id !== `file:${cursor.path}`) throw new Error("The saved review item is unavailable; newer context was not substituted.");
+    // An unknown or mismatched item never blocks resuming: the saved path and line are the reading point.
+    if (item?.path && item.path !== cursor.path) item = null;
     state.selected = item || { id: `file:${cursor.path}`, kind: "file", path: cursor.path, name: cursor.path };
     state.reviewPage = "review";
     state.exploring = false;
@@ -1508,6 +1593,7 @@ function openFinishReview() {
     state.navigationOpen = false;
     elements.source_panel.classList.add("hidden");
     render();
+    flushReviewCursor();
     elements.review_finish.focus({ preventScroll: true });
 }
 
@@ -1527,7 +1613,7 @@ function renderFinishReview() {
         const button = el("button", "review-next", `Continue at ${layer && navigation.layers.length > 1 ? `${layerLabel(layer)} › ` : ""}${next.path.split("/").at(-1)}${next.line ? `:${next.line}` : ""}`);
         button.type = "button";
         button.title = `Opens ${next.path}`;
-        button.addEventListener("click", () => (next.resume ? resumeReviewCursor(next.resume) : openFileReview(next.entry)).catch(showError));
+        button.addEventListener("click", () => openOverviewDestination(next).catch(showError));
         panel.append(button);
     }
     if (navigation?.layers.length) {
@@ -1537,8 +1623,7 @@ function renderFinishReview() {
             const progress = layerProgress(layer);
             const row = el("button", `overview-layer${layer.supporting ? " is-supporting" : ""}`);
             row.type = "button";
-            const name = el("span", "overview-layer-name");
-            name.append(el("strong", "", layer.name));
+            const name = layerHeading(layer, { path: false });
             row.append(el("span", "overview-layer-number", layer.number ? String(layer.number) : "·"), name,
                 el("span", "overview-layer-progress", `${progress.reviewed}/${progress.total} reviewed`));
             row.addEventListener("click", () => openLayer(navigation, layer));
@@ -1895,12 +1980,25 @@ function openSections(location = null) {
     if (state.reviewPage === "review" && !state.exploring) {
         state.navigationMode = "groups";
         state.navigationKey = null;
+        state.navigationQuery = "";
+        elements.workspace_search.value = "";
         state.navigationOpen = true;
         renderWorkspaceNavigation();
         renderWorkspaceShell();
-        const current = [...elements.workspace_nav_list.querySelectorAll(".workspace-group")]
-            .find((group) => group.dataset.group === state.activeReviewGroup);
-        current?.querySelector("button")?.focus({ preventScroll: true });
+        // Reveal the file's layer in the rail: expand it, bring it into view and briefly mark it.
+        const group = state.workspaceNavigation?.groups.find((item) => item.id === state.activeReviewGroup)
+            || state.workspaceNavigation?.groups.find((item) => item.files.some((file) => file.path === state.source?.path));
+        const layer = group && [...elements.workspace_nav_list.querySelectorAll(".workspace-layer")]
+            .find((item) => item.dataset.layer === group.layer);
+        if (!layer) return;
+        layer.open = true;
+        layer.scrollIntoView({ block: "start" });
+        layer.classList.remove("is-revealed");
+        void layer.offsetWidth;
+        layer.classList.add("is-revealed");
+        setTimeout(() => layer.classList.remove("is-revealed"), 1800);
+        const current = [...layer.querySelectorAll(".workspace-file")].find((file) => file.getAttribute("aria-current") === "location");
+        (current || layer.querySelector("summary")).focus({ preventScroll: true });
         return;
     }
     state.sectionFocus = location;
@@ -2253,7 +2351,7 @@ function renderBreadcrumbs() {
     elements.breadcrumbs.replaceChildren();
     // The plan/architecture trail belongs to Explore; the Overview has a single reading path.
     elements.breadcrumbs.classList.toggle("hidden", state.reviewPage === "overview" || state.reviewPage === "finish");
-    const plan = el("button", "", "Review plan");
+    const plan = el("button", "", "Attention");
     plan.type = "button";
     plan.addEventListener("click", resetToWalkthrough);
     elements.breadcrumbs.append(plan);
@@ -2362,11 +2460,47 @@ function layeredNavigation() {
 }
 
 function layerOf(navigation, entry) {
-    const group = entry && navigation?.groups.find((item) => item.id === entry.group || item.files.some((file) => file.path === entry.path));
-    return group && navigation.layers.find((layer) => layer.id === group.layer);
+    if (!navigation || !entry) return null;
+    if (entry.group) {
+        const group = navigation.groups.find((item) => item.id === entry.group);
+        if (group) return navigation.layers.find((layer) => layer.id === group.layer);
+    }
+    if (!navigation.layerByPath) {
+        navigation.layerByPath = new Map();
+        for (const layer of navigation.layers) for (const group of layer.groups) for (const file of group.files) {
+            if (!navigation.layerByPath.has(file.path)) navigation.layerByPath.set(file.path, layer);
+        }
+    }
+    return navigation.layerByPath.get(entry.path) || null;
 }
 
-const layerLabel = (layer) => layer ? `${layer.number ? `${layer.number}. ` : ""}${layer.name}` : "";
+// AI step titles name what the reader does in a layer; the deterministic area name stays as the subtitle and fallback.
+const layerTitle = (layer) => layer ? state.payload?.annotations?.layers?.titles?.[layer.id] || layer.name : "";
+const layerLabel = (layer) => layer ? `${layer.number ? `${layer.number}. ` : ""}${layerTitle(layer)}` : "";
+
+function dependencyLabel(navigation, dependency) {
+    const layer = navigation?.layers.find((item) => item.number === dependency.number);
+    return layer ? layerLabel(layer) : `${dependency.number}. ${dependency.name}`;
+}
+
+function layerHeading(layer, { path = true } = {}) {
+    const name = el("span", "layer-title");
+    const title = layerTitle(layer);
+    name.append(el("strong", "", title));
+    if (title !== layer.name) {
+        const badge = el("span", "workspace-layer-ai", "AI");
+        badge.title = "AI-written step title; the area name is shown beside it";
+        name.append(badge);
+    }
+    const area = [title !== layer.name ? layer.name : null, path && layer.path && layer.path !== "/" && !layer.supporting ? layer.path : null].filter(Boolean);
+    if (area.length) name.append(el("span", "layer-area muted", area.join(" · ")));
+    if (layer.number && layer.number > 1 && !layer.dependsOn.length) {
+        const independent = el("span", "layer-independent", "independent");
+        independent.title = "No changed file in this layer imports or calls an earlier layer; it can be read in any order.";
+        name.append(independent);
+    }
+    return name;
+}
 
 function layerProgress(layer) {
     const files = layer.groups.flatMap((group) => group.files);
@@ -2393,16 +2527,17 @@ function renderOverviewLayers(navigation) {
         const progress = layerProgress(layer);
         const row = el("button", `overview-layer${layer.supporting ? " is-supporting" : ""}`);
         row.type = "button";
-        const name = el("span", "overview-layer-name");
-        name.append(el("strong", "", layer.name));
-        if (layer.path && layer.path !== "/" && !layer.supporting) name.append(el("code", "muted", layer.path));
+        const name = layerHeading(layer);
         row.append(el("span", "overview-layer-number", layer.number ? String(layer.number) : "·"), name,
             el("span", "overview-layer-progress", `${progress.reviewed}/${progress.total} reviewed`));
         const intent = state.payload.annotations?.layers?.intents?.[layer.id];
         const details = [];
         const top = plan.filter((item) => item.path && paths.has(item.path)).sort((a, b) => b.score - a.score)[0];
-        if (layer.dependsOn.length) details.push(`builds on ${layer.dependsOn.map(layerLabel).join(", ")}`);
-        if (top) details.push(`top priority: ${top.title}${top.kind === "package" && top.reasons?.[0] ? ` (${top.reasons[0]})` : ""}`);
+        if (layer.dependsOn.length) details.push(`builds on ${layer.dependsOn.map((dependency) => dependencyLabel(navigation, dependency)).join(", ")}`);
+        if (top) {
+            const title = top.title.replace(/^(?:[\w$]+\.)+(?=[\w$]+\.[\w$]+(?:\(|$))/, "").replace(/\(.{24,}\)$/, "(…)");
+            details.push(`top priority: ${title}${top.kind === "package" && top.reasons?.[0] ? ` (${top.reasons[0]})` : ""}`);
+        }
         const detail = el("span", "overview-layer-detail");
         if (intent) detail.append(el("span", "workspace-layer-ai", "AI"), document.createTextNode(intent));
         else if (layer.summary) detail.append(document.createTextNode(layer.summary));
@@ -2418,7 +2553,7 @@ function renderOverviewLayers(navigation) {
 
 // Exactly where Start/Continue goes: the saved reading point if its file is still unreviewed, else the next rail file.
 function overviewDestination() {
-    const saved = state.savedReviewCursor;
+    const saved = liveReviewCursor();
     const model = state.payload?.model;
     const changed = saved && model?.changes.some((file) => file.path === saved.path && file.status !== "unchanged");
     if (changed && (state.reviewLedger.get(fileReviewId(saved.path))?.disposition || "pending") === "pending") {
@@ -2521,8 +2656,7 @@ elements.overview_start.addEventListener("click", async () => {
     try {
         await readySectionData();
         const destination = overviewDestination();
-        if (destination?.resume) await resumeReviewCursor(destination.resume);
-        else await openFileReview(destination?.entry || null);
+        await openOverviewDestination(destination);
     } catch (error) { showError(error); }
 });
 elements.overview_files.addEventListener("click", browseReviewFiles);
@@ -4254,7 +4388,7 @@ function renderReviewPlan(model, findings) {
     );
     if (progress.total) {
         introCopy.append(el("p", "review-progress",
-            `${progress.completed.toLocaleString()} of ${countLabel(progress.total, "item")} reviewed (from file decisions and concern triage)${
+            `${progress.completed.toLocaleString()} of ${countLabel(progress.total, "attention item")} covered by reviewed files or concern triage${
                 progress.followUp ? ` · ${countLabel(progress.followUp, "item")} ${plural(progress.followUp, "needs", "need")} follow-up` : ""}${
                 allPlan.omitted ? ` · ${countLabel(allPlan.omitted, "additional qualifying change")} omitted` : ""}`));
     }
@@ -5602,9 +5736,13 @@ function renderView() {
     // Freshness is one header chip; its explanation is disclosed on demand and the header Reanalyze is the single action.
     elements.worktree_notice.classList.toggle("hidden", !worktreeNotice || !state.freshnessOpen);
     elements.worktree_notice_text.textContent = payload?.worktree_check_error
-        || "Worktree changed since this review. Use Reanalyze in the header to include the latest edits.";
+        || "Worktree changed since this review. Reanalyze from the Overview header to include the latest edits.";
     elements.status.setAttribute("aria-disabled", String(!worktreeNotice));
     elements.status.setAttribute("aria-expanded", String(Boolean(worktreeNotice && state.freshnessOpen)));
+    // The header is hidden while reading code; the workflow row repeats only the stale state so it is never invisible.
+    elements.workspace_freshness.classList.toggle("hidden", !worktreeNotice);
+    elements.workspace_freshness.textContent = payload?.worktree_changed ? "Worktree changed" : "Freshness unknown";
+    elements.workspace_freshness.setAttribute("aria-expanded", String(Boolean(worktreeNotice && state.freshnessOpen)));
     elements.refresh.classList.toggle("needs-attention", Boolean(worktreeNotice));
     elements.repository_identity.textContent = model?.metadata?.repo_root
         ? `${model.metadata.repo_root} · ${state.reviewPickerPending ? "Choose a comparison" : `Base ${model.metadata.base_sha?.slice(0, 8) || "empty tree"}`}` : payload?.repo_root || "";
@@ -5710,7 +5848,7 @@ function renderView() {
     elements.impact_view.setAttribute("aria-pressed", String(state.mode === "impact"));
     elements.impact_view.textContent = state.mode === "impact" ? "Structure" : "Impact";
     elements.sections_view.setAttribute("aria-pressed", String(state.mode === "sections"));
-    elements.sections_view.textContent = state.mode === "sections" ? "Review plan" : "Sections";
+    elements.sections_view.textContent = state.mode === "sections" ? "Attention" : "Sections";
     renderWorkspaceNavigation();
     renderWorkspaceShell();
     if (state.reviewPage === "review" && state.exploring && state.mode === "findings") {
@@ -5828,6 +5966,10 @@ async function reanalyze() {
 elements.refresh.addEventListener("click", reanalyze);
 elements.status.addEventListener("click", () => {
     if (elements.status.getAttribute("aria-disabled") === "true") return;
+    state.freshnessOpen = !state.freshnessOpen;
+    render();
+});
+elements.workspace_freshness.addEventListener("click", () => {
     state.freshnessOpen = !state.freshnessOpen;
     render();
 });

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { layerSummaryContext, layerSummaryPrompt, layerSummarySchema, validateLayerSummaries } from "../layer-summaries.mjs";
+import { layerSummaryContext, layerSummaryPrompt, layerSummarySchema, parseLayerSummaries, validateLayerSummaries } from "../layer-summaries.mjs";
 import { ReviewState } from "../review-state.mjs";
 import { workspaceNavigation } from "../web/review-workspace.mjs";
 
@@ -41,6 +41,42 @@ test("layer intents must cover every layer with one short plain sentence", () =>
     assert.throws(() => validateLayerSummaries({ layers: [{ id: utils, intent: "See [docs](https://x)" }, { id: ui, intent: "Cards render formatted titles" }] }, context), /plain sentence/);
     const long = Array.from({ length: 24 }, (_, index) => `word${index}`).join(" ");
     assert.throws(() => validateLayerSummaries({ layers: [{ id: utils, intent: long }, { id: ui, intent: "Cards render formatted titles" }] }, context), /at most 16 words/);
+});
+
+test("layer step titles are short AI labels that fall back to the area name when unusable", () => {
+    const context = layerSummaryContext(model, workspaceNavigation(model, data));
+    const [utils, ui] = context.layers.map((layer) => layer.id);
+    assert.match(layerSummaryPrompt(context), /2-6 words/);
+    assert.deepEqual(layerSummarySchema(context).properties.layers.items.required, ["id", "title", "intent"]);
+    assert.deepEqual(parseLayerSummaries({ layers: [
+        { id: utils, title: "Trim formatted values.", intent: "Trims formatted values" },
+        { id: ui, title: "This title is far too long to be a step", intent: "Cards render formatted titles" },
+    ] }, context), {
+        intents: { [utils]: "Trims formatted values", [ui]: "Cards render formatted titles" },
+        titles: { [utils]: "Trim formatted values" },
+    });
+    assert.deepEqual(parseLayerSummaries({ layers: [
+        { id: utils, title: "`format`", intent: "Trims formatted values" }, { id: ui, intent: "Cards render formatted titles" },
+    ] }, context).titles, {}, "markup and missing titles are dropped, intents still validate");
+});
+
+test("cached layer intents written before step titles are regenerated once", async () => {
+    let calls = 0;
+    const state = new ReviewState("C:\\repo", { generateLayerSummaries: async (context) => {
+        calls++;
+        return { intents: Object.fromEntries(context.layers.map((layer) => [layer.id, `Changes in ${layer.name}`])),
+            titles: Object.fromEntries(context.layers.map((layer) => [layer.id, `Review ${layer.name} step`])) };
+    } });
+    state.model = model;
+    state.reviewTarget = { mode: "commit" };
+    state.annotations.layers = { id: "annotation:layers", item_id: "layers", intents: { old: "Old cache" }, generated_at: "2026-01-01" };
+    const result = await state.layerSummariesFor();
+    assert.equal(calls, 1);
+    assert.equal(Object.keys(result.titles).length, 2);
+    assert.match(Object.values(result.titles)[0], /^Review .* step$/);
+    await state.layerSummariesFor();
+    assert.equal(calls, 1, "titled caches are reused");
+    await state.dispose();
 });
 
 test("layer summaries are generated once per review and cached with its annotations", async () => {

@@ -45,7 +45,7 @@ try {
         const errors = [];
         page.on("pageerror", (error) => errors.push(error.message));
         await page.goto(`${server.url}?scoutTheme=${theme}`);
-        await page.locator(".quality-warning").click();
+        await page.locator("#overview-limitation button").click();
         const list = page.locator("#detail .analysis-warning-list");
         await list.waitFor();
         assert.equal(await list.locator(":scope > li").count(), 79, "one semantic list item per note");

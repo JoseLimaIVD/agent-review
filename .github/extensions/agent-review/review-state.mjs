@@ -374,6 +374,7 @@ export class ReviewState {
         try {
             const navigation = workspaceNavigation(model, sectionsFor(model, this.reviewEvidenceModel === model ? this.reviewEvidence : null));
             return navigation.layers.map((layer) => ({ number: layer.number, name: layer.name, supporting: Boolean(layer.supporting),
+                title: this.annotations.layers?.titles?.[layer.id] || null,
                 intent: this.annotations.layers?.intents?.[layer.id] || null, summary: layer.summary,
                 files: layer.groups.flatMap((group) => group.files.map((file) => file.path)) }));
         } catch { return null; }
@@ -1646,7 +1647,8 @@ export class ReviewState {
 
     async layerSummariesFor() {
         if (this.loading || !this.model) throw new Error("Wait for analysis to complete before summarizing layers.");
-        if (this.annotations.layers) return this.annotations.layers;
+        // Caches written before step titles existed are regenerated once so every surface can show titles.
+        if (this.annotations.layers?.titles) return this.annotations.layers;
         if (!this.generateLayerSummaries) throw new Error("Copilot layer summaries are unavailable in this provider.");
         if (this.annotationPromises.has("layers")) return this.annotationPromises.get("layers");
         const generation = this.reviewGeneration;
@@ -1654,9 +1656,11 @@ export class ReviewState {
         const promise = (async () => {
             const navigation = workspaceNavigation(model, this.reviewSectionsFor());
             const context = layerSummaryContext(model, navigation, this.annotations.overview?.body || null);
-            const intents = context.layers.length ? await this.generateLayerSummaries(context) : {};
+            const result = context.layers.length ? await this.generateLayerSummaries(context) : {};
+            const steps = result && typeof result.intents === "object" ? result : { intents: result || {}, titles: {} };
             if (generation !== this.reviewGeneration || this.model !== model) throw new Error("The review changed while summarizing layers.");
-            const annotation = { id: "annotation:layers", item_id: "layers", intents, generated_at: new Date().toISOString() };
+            const annotation = { id: "annotation:layers", item_id: "layers", intents: steps.intents, titles: steps.titles || {},
+                generated_at: new Date().toISOString() };
             this.annotations.layers = annotation;
             this.saveCurrentReview();
             this.broadcast("annotation");

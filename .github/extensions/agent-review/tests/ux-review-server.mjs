@@ -6,7 +6,7 @@ import { buildDiscussionVerificationPrompt, discussionPrompt, discussionSchema }
 import { managedCopilotPath } from "../managed-copilot.mjs";
 import { generateIsolatedExplanation } from "../ai-explainer.mjs";
 import { ANNOTATION_HEADINGS, OVERVIEW_HEADINGS, buildAnnotationPrompt, buildAnnotationVerificationPrompt, buildOverviewPrompt } from "../ai-prompts.mjs";
-import { layerSummaryPrompt, layerSummarySchema, validateLayerSummaries } from "../layer-summaries.mjs";
+import { layerSummaryPrompt, layerSummarySchema, parseLayerSummaries, validateLayerSummaries } from "../layer-summaries.mjs";
 import { resolveReviewTarget } from "../review-target.mjs";
 
 const repo = process.env.AGENT_REVIEW_UX_REPO;
@@ -34,7 +34,7 @@ const state = new ReviewState(repo, { baseRef: "HEAD", readWorktreeFingerprint: 
             requiredHeadings: context.kind === "overview" ? OVERVIEW_HEADINGS : ANNOTATION_HEADINGS,
             ...(context.kind !== "overview" ? { verifyPrompt: (draft) => buildAnnotationVerificationPrompt(context, draft) } : {}),
         }),
-        generateLayerSummaries: async (context) => validateLayerSummaries(await generateIsolatedExplanation({
+        generateLayerSummaries: async (context) => parseLayerSummaries(await generateIsolatedExplanation({
             workingDirectory: repo, runtimeClient: client, prompt: layerSummaryPrompt(context), responseSchema: layerSummarySchema(context),
             validateResponse: (content) => { validateLayerSummaries(content, context); return content; },
         }), context),

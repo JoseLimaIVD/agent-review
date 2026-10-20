@@ -56,7 +56,7 @@ try {
         await page.goto(`${server.url}?scoutTheme=${theme}`);
         await page.locator("#summary .metric").first().waitFor();
         assert.match(await page.locator("#summary").getAttribute("title"), /Go LOC/);
-        assert.match(await page.locator(".quality-warning").textContent(), /Go coverprofile/);
+        assert.match(await page.locator("#overview-limitation").textContent(), /Go coverprofile/);
         assert.equal(await page.locator(".review-plan-row", { hasText: "Classify" }).count(), 0,
             "a small callable change without an absolute risk signal stays out of the focused plan");
         const plan = page.locator(".review-plan-row", { hasText: "golang.org/x/sync" }).first();
