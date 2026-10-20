@@ -57,7 +57,7 @@ const state = {
     fileReviewDrafts: new Map(),
 };
 const elements = Object.fromEntries([
-    "source-coverage", "overview-layers", "overview-stats", "overview-limitation",
+    "source-coverage", "source-strip", "source-strip-toggle", "source-strip-body", "overview-layers", "overview-stats", "overview-limitation",
     "review-target-form", "review-mode", "review-ref", "review-target-label", "repository-identity", "review-list-refresh", "review-more", "review-options-status", "review-picker-notice", "clean-review", "change-brief",
     "review-overview", "review-background", "overview-title", "overview-description", "overview-progress", "overview-scope", "overview-start", "overview-files",
     "review-workflow", "workflow-overview", "workflow-review", "workflow-finish", "review-finish", "workspace-target", "workspace-freshness", "workspace-find", "workspace-nav-toggle",
@@ -1508,7 +1508,8 @@ function renderFileReview() {
     if (!changed) return;
     const key = `${state.reviewLedgerStorageKey}:${source.path}`;
     const record = state.fileReviewDrafts.get(key) || state.reviewLedger.get(fileReviewId(source.path)) || { disposition: "pending", note: "" };
-    elements.file_review_label.textContent = `Whole-file review · ${source.path}`;
+    elements.file_review_label.textContent = `Decision · ${source.path.split("/").at(-1)}`;
+    elements.file_review_label.title = `Whole-file review · ${source.path}`;
     if (elements.file_review_form.dataset.key !== key || !state.fileReviewDrafts.has(key)) {
         elements.file_review_form.dataset.key = key;
         elements.file_review_disposition.value = record.disposition;
@@ -1522,7 +1523,8 @@ function renderFileReview() {
     elements.file_review_status.textContent = state.progressError ? `Not saved: ${state.progressError}`
         : state.progressLoading ? "Restoring session progress…" : state.progressSaving ? "Saving…"
             : state.fileReviewDrafts.has(key) ? "Unsaved whole-file decision"
-            : state.progressDurable ? "Progress saved in this session workspace" : "Progress is memory-only until this provider closes";
+            : state.progressDurable ? "Saved" : "Memory-only progress";
+    elements.file_review_status.title = state.progressDurable ? "Progress is saved in this session workspace" : "Progress is memory-only until this provider closes";
     elements.file_review_retry.classList.toggle("hidden", !state.progressError);
 }
 
@@ -3820,7 +3822,9 @@ function renderSourceCoverage() {
     const path = state.source?.path;
     const lines = coverageLines(path);
     const changed = state.payload?.model?.coverage?.changed_lines?.[path];
-    if (!lines?.size || state.sourceTab === "base") { panel.classList.add("hidden"); return; }
+    state.sourceStripCoverage = null;
+    if (!lines?.size || state.sourceTab === "base") { panel.classList.add("hidden"); renderSourceStrip(); return; }
+    state.sourceStripCoverage = changed?.total ? { covered: changed.covered, total: changed.total } : { supplied: true };
     panel.replaceChildren(
         el("strong", "", "Line coverage"),
         el("span", "coverage-key coverage-key-covered", "executed"),
@@ -3830,6 +3834,43 @@ function renderSourceCoverage() {
                 ? ` · not executed: ${changed.uncovered_lines.slice(0, 12).join(", ")}${changed.uncovered_lines.length > 12 ? "…" : ""}` : ""} · supplied run, current side; not proof of named tests.`
             : "Supplied run, current side; not proof of named tests."));
     panel.classList.remove("hidden");
+    renderSourceStrip();
+}
+
+// One line above the code summarizes the concern, its static priority, triage and coverage; the full cards expand below it.
+function renderSourceStrip() {
+    const risk = !elements.source_risk.classList.contains("hidden") ? state.sourceStripRisk : null;
+    const coverage = state.sourceStripCoverage;
+    const show = Boolean(state.source && (risk || coverage));
+    elements.source_strip.classList.toggle("hidden", !show);
+    if (!show) return;
+    const open = Boolean(state.sourceStripOpen);
+    const toggle = elements.source_strip_toggle;
+    toggle.replaceChildren();
+    toggle.setAttribute("aria-expanded", String(open));
+    elements.source_strip_body.classList.toggle("hidden", !open);
+    const parts = [];
+    if (risk) {
+        toggle.append(el("strong", "source-strip-title", risk.title));
+        parts.push(el("span", "source-strip-score", `Static priority ${risk.score}`));
+        if (risk.reason) parts.push(el("span", "source-strip-reason", risk.reason));
+        if (risk.triage) parts.push(el("span", "source-strip-triage", `Triage: ${risk.triage}`));
+    }
+    if (coverage) {
+        const summary = el("span", "source-strip-coverage");
+        if (coverage.total) {
+            summary.append(el("span", "coverage-key coverage-key-covered", `${coverage.covered}`),
+                document.createTextNode(` of ${countLabel(coverage.total, "changed line")} executed`));
+            if (coverage.total > coverage.covered) summary.append(document.createTextNode(" · "),
+                el("span", "coverage-key coverage-key-uncovered", `${coverage.total - coverage.covered} not executed`));
+        } else summary.append(el("span", "coverage-key coverage-key-covered", "line coverage supplied"));
+        parts.push(summary);
+    }
+    for (const part of parts) {
+        if (toggle.childNodes.length) toggle.append(el("span", "source-strip-sep", "·"));
+        toggle.append(part);
+    }
+    toggle.append(el("span", "source-strip-more", open ? "Hide details" : risk ? "Details & triage" : "Legend"));
 }
 
 function codeRow(type, oldNumber, newNumber, prefix, content) {
@@ -4433,7 +4474,7 @@ function renderReviewPlan(model, findings) {
             heading.append(el("strong", "", item.title));
             const badges = el("span", "review-plan-badges");
             if (disposition !== "pending") badges.append(el("span", `review-disposition disposition-${disposition}`, dispositionLabels[disposition]));
-            badges.append(el("b", "impact-score", `Priority ${item.score}/100`));
+            badges.append(el("b", "impact-score", `Static priority ${item.score}/100`));
             heading.append(badges);
             copy.append(heading);
             if (item.path) copy.append(el("span", "review-plan-path", `${item.path}${item.line ? `:${item.line}` : ""}`));
@@ -4939,6 +4980,8 @@ function renderSourceRisk() {
     const selected = state.selected;
     if (!model || !selected || !state.source) {
         panel.classList.add("hidden");
+        state.sourceStripRisk = null;
+        renderSourceStrip();
         return;
     }
     const findings = [
@@ -4954,15 +4997,16 @@ function renderSourceRisk() {
         || candidate.finding?.id === selectedId);
     if (!item || (item.path && item.path !== state.source.path && item.kind !== "package")) {
         panel.classList.add("hidden");
+        state.sourceStripRisk = null;
+        renderSourceStrip();
         return;
     }
     panel.replaceChildren();
     panel.classList.remove("hidden");
     const heading = el("div", "source-risk-heading");
-    heading.append(
-        el("strong", "", item.finding?.title || item.title),
-        el("b", "impact-score", `Priority ${item.score}/100`),
-    );
+    const score = el("b", "impact-score", `Static priority ${item.score}/100`);
+    score.title = "Deterministic priority from impact, churn, caller reach and test evidence. It is separate from any AI risk assessment.";
+    heading.append(el("strong", "", item.finding?.title || item.title), score);
     const explanation = item.finding?.reason || item.finding?.body;
     if (explanation) panel.append(heading, el("p", "source-risk-copy", explanation));
     else panel.append(heading);
@@ -5009,6 +5053,9 @@ function renderSourceRisk() {
             : "Triage this concern (optional): accepted risk, false positive or follow-up"),
         el("p", "muted", "Review progress comes from the whole-file decision below; triage records why a concern can be set aside."), controls);
     panel.append(reasons, priority);
+    state.sourceStripRisk = { title: item.finding?.title || item.title, score: item.score,
+        reason: item.reasons.find((reason) => reason !== item.finding?.title) || null, triage: triaged ? reviewStateLabel(current) : null };
+    renderSourceStrip();
 }
 
 function renderReviewContext() {
@@ -5968,6 +6015,10 @@ async function reanalyze() {
     }
 }
 elements.refresh.addEventListener("click", reanalyze);
+elements.source_strip_toggle.addEventListener("click", () => {
+    state.sourceStripOpen = !state.sourceStripOpen;
+    renderSourceStrip();
+});
 elements.status.addEventListener("click", () => {
     if (elements.status.getAttribute("aria-disabled") === "true") return;
     state.freshnessOpen = !state.freshnessOpen;
@@ -6040,7 +6091,18 @@ window.addEventListener("keydown", (event) => {
         return;
     }
     if (event.key === "Escape" && !elements.source_panel.classList.contains("hidden")) {
-        elements.source_close.click();
+        // Over an Explore lens the source is an overlay, so Esc returns to the lens. In Review, Esc never leaves the file:
+        // it clears the highlighted range, and Close × remains the way to close it.
+        if (state.reviewPage !== "review" || state.exploring) {
+            elements.source_close.click();
+            return;
+        }
+        if (event.target.closest?.("input, textarea, select")) return;
+        event.preventDefault();
+        const marked = elements.source.querySelectorAll(".focus-line, .cited-line");
+        for (const row of marked) row.classList.remove("focus-line", "focus-start", "focus-end", "cited-line", "cited-start", "cited-end");
+        if (state.source) state.source.highlights = null;
+        if (!elements.source_panel.contains(document.activeElement)) elements.source.focus({ preventScroll: true });
         return;
     }
     if (event.altKey && ["ArrowLeft", "ArrowRight"].includes(event.key) && !elements.source_panel.classList.contains("hidden")) {

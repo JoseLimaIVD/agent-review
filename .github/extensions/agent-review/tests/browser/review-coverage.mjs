@@ -48,6 +48,9 @@ try {
             for (const line of file.missing_lines) if (shown[line]) assert.equal(shown[line], "uncovered", `${tab} line ${line}`);
             const uncoveredChanged = coverage.changed_lines[file.path].uncovered_lines || [];
             assert.ok(uncoveredChanged.some((line) => shown[line] === "uncovered"), `${tab} marks a changed uncovered line`);
+            const strip = page.locator("#source-strip-toggle");
+            assert.match(await strip.textContent(), /of \d+ changed lines? executed|line coverage supplied/, "the strip summarizes coverage");
+            if (await strip.getAttribute("aria-expanded") !== "true") await strip.click();
             const legend = page.locator("#source-coverage");
             assert.equal(await legend.isVisible(), true);
             assert.match(await legend.textContent(), /not executed/);

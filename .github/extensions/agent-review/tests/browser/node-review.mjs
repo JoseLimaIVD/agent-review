@@ -131,10 +131,12 @@ try {
         await page.locator('.node[aria-label^="resolveReference,"]').click();
         await page.waitForFunction(() => /packages\/core\/src\/resolver\.js:\d+/.test(document.querySelector("#source-title")?.textContent || ""));
         assert.match(await page.locator("#source-risk").textContent(),
-            /Cyclomatic complexity increased.*Priority \d+\/100.*resolveReference increased from 1 to 3/s);
+            /Cyclomatic complexity increased.*Static priority \d+\/100.*resolveReference increased from 1 to 3/s);
         await page.locator("#source-decisions .source-verification").waitFor();
         assert.match(await page.locator("#source-decisions .source-verification").textContent(), /Run linked tests/);
         if (theme === "light") {
+            if (await page.locator("#source-strip-toggle").getAttribute("aria-expanded") !== "true") await page.locator("#source-strip-toggle").click();
+            await page.locator(".priority-review-details > summary").click();
             await page.locator(".source-review-disposition").selectOption("follow-up");
             await page.locator(".source-review-note").fill("Exercise the legacy-reference error branch.");
             await page.locator(".source-review-save").click();

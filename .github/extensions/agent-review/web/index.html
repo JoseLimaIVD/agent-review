@@ -211,8 +211,13 @@
                 <span id="workspace-group-label" class="muted"></span>
             </div>
             <p id="source-context-notice" class="muted source-context-notice hidden" role="status"></p>
-            <p id="source-coverage" class="source-coverage hidden" role="note"></p>
-            <section id="source-risk" class="source-risk hidden" aria-label="Review priority"></section>
+            <div id="source-strip" class="source-strip hidden">
+                <button id="source-strip-toggle" class="source-strip-toggle" type="button" aria-expanded="false" aria-controls="source-strip-body"></button>
+                <div id="source-strip-body" class="source-strip-body hidden">
+                    <p id="source-coverage" class="source-coverage hidden" role="note"></p>
+                    <section id="source-risk" class="source-risk hidden" aria-label="Review priority"></section>
+                </div>
+            </div>
             <div class="source-body">
                 <div class="code-frame">
                     <div id="source" class="code-view" role="region" tabindex="0" aria-label="Source and diff"></div>
@@ -316,7 +321,7 @@
         <p id="review-command-count" class="muted" role="status"></p>
         <ul id="review-command-results" class="review-command-results"></ul>
         <p class="muted">Searches this snapshot's file names, symbols, and findings—not full source text. Results are capped at 30.</p>
-        <p class="muted">With review or source focus: J/K next/previous item, A ask, I impact, F focus code. Ctrl+K opens this finder outside editable fields. Escape exits focus mode or closes the source workspace. Ctrl+Enter sends a discussion question.</p>
+        <p class="muted">With review or source focus: J/K next/previous item, A ask, I impact, F focus code. Ctrl+K opens this finder outside editable fields. Escape exits focus mode, clears a highlighted range, or returns from source opened in Explore; use Close × to close a file in Review. Ctrl+Enter sends a discussion question.</p>
     </dialog>
     <dialog id="repository-picker" class="prompt-manager" aria-labelledby="repository-picker-title">
         <div class="custom-heading">

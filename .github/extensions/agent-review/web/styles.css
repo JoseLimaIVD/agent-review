@@ -622,6 +622,9 @@ marker path { fill: var(--cp-border-strong); }
   overflow: hidden;
 }
 .source-panel > .panel-heading { padding: 14px 18px; border-bottom: 1px solid var(--cp-border); }
+/* In Review the file title is self-explanatory; give its rows back to the code. */
+body.reviewing .source-panel > .panel-heading { padding: 8px 12px; }
+body.reviewing .source-heading .eyebrow { display: none; }
 .tablist { display: flex; gap: 4px; }
 .tab.active { border-color: var(--cp-accent); background: var(--cp-accent-soft); color: var(--cp-accent); }
 .source-close { margin-left: 8px; border-color: var(--cp-border-strong); }
@@ -2121,6 +2124,29 @@ body.reviewing .graph-controls input[type="search"] { min-width: 80px; flex: 1; 
 body.reviewing #graph { flex: 1; min-height: 0; overflow: auto; }
 .source-coverage { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 0; padding: 6px 12px; border-bottom: 1px solid var(--cp-border); font-size: 12px; }
 .source-coverage.hidden { display: none; }
+.source-strip { flex: 0 0 auto; border-bottom: 1px solid var(--cp-border); background: var(--cp-surface); }
+.source-strip-toggle { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; width: 100%; min-height: 32px; padding: 4px 12px; overflow: hidden;
+  border: 0; background: transparent; color: var(--cp-text-muted); font: inherit; font-size: 12px; text-align: left; white-space: nowrap; cursor: pointer; }
+.source-strip-toggle:hover { background: var(--cp-surface-soft); }
+.source-strip-toggle:focus-visible { outline: 2px solid var(--cp-link); outline-offset: -2px; }
+.source-strip-toggle > * { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.source-strip-title { flex-shrink: 2; color: var(--cp-text); font-weight: 600; }
+.source-strip-score { padding: 0 6px; border: 1px solid var(--cp-border); border-radius: 10px; color: var(--cp-text); font-weight: 600; }
+.source-strip-triage { color: var(--cp-warning); }
+.source-strip-coverage { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.source-strip-coverage .coverage-key { gap: 4px; }
+.source-strip-sep { flex: 0 0 auto; color: var(--cp-text-soft, var(--cp-text-muted)); }
+.source-strip-more { flex: 0 0 auto; margin-left: auto; color: var(--cp-link); }
+.source-strip-more::after { content: " ▸"; }
+.source-strip-toggle[aria-expanded="true"] .source-strip-more::after { content: " ▾"; }
+.source-strip-body.hidden { display: none; }
+.source-strip-body { max-height: 40vh; overflow: auto; border-top: 1px solid var(--cp-border); }
+@media (max-width: 600px) {
+  .source-strip-toggle { flex-wrap: wrap; row-gap: 2px; }
+  .source-strip-toggle > * { flex: 0 0 auto; }
+  .source-strip-toggle > .source-strip-title { flex: 1 1 100%; }
+  .source-strip-toggle > .source-strip-title + .source-strip-sep, .source-strip-reason, .source-strip-reason + .source-strip-sep { display: none; }
+}
 .coverage-key { display: inline-flex; align-items: center; gap: 6px; color: var(--cp-text); }
 .coverage-key::before { content: ""; width: 4px; height: 14px; border-radius: 2px; }
 .coverage-key-covered::before { background: var(--cp-success); }
@@ -2134,14 +2160,15 @@ body.reviewing .workspace.impact-mode .impact-graph svg { min-height: 0; }
 body.reviewing:not(.workspace-exploring) .graph-panel > .panel-heading { display: none; }
 body.reading-source .workspace { visibility: hidden; }
 body.reviewing #source-panel { top: var(--workspace-top, var(--workflow-height)); left: var(--workspace-navigation-width); z-index: 100; }
-.file-review-footer { flex: 0 0 auto; display: grid; grid-template-columns: minmax(200px, 1fr) minmax(100px, 1fr) auto auto; gap: 6px; align-items: end; padding: 8px 12px; border-top: 1px solid var(--cp-border); background: var(--cp-surface); }
-.file-review-footer label { display: grid; gap: 3px; min-width: 0; font-size: 12px; }
-#file-review-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-review-footer { flex: 0 0 auto; display: grid; grid-template-columns: auto minmax(100px, 1fr) auto auto minmax(0, auto); gap: 6px; align-items: center; padding: 6px 12px; border-top: 1px solid var(--cp-border); background: var(--cp-surface); }
+.file-review-footer label { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; }
+#file-review-label { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--cp-text-muted); }
 .file-review-footer input, .file-review-footer select, .file-review-footer button { min-width: 0; min-height: 32px; padding: 5px 8px; border: 1px solid var(--cp-border); border-radius: 6px; background: var(--cp-surface); color: var(--cp-text); }
 .file-review-footer button { cursor: pointer; }
 .file-review-footer button:disabled { opacity: .5; cursor: default; }
 #file-review-next { background: var(--cp-primary); border-color: var(--cp-primary); color: #fff; font-weight: 600; }
-#file-review-status { grid-column: 1 / -1; }
+#file-review-status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+#file-review-retry { grid-column: 1 / -1; justify-self: start; }
 .review-finish { margin: 16px auto; max-width: 1100px; padding: 20px; border: 1px solid var(--cp-border); border-radius: 6px; background: var(--cp-surface); }
 .review-finish h2 { margin: 8px 0; font-size: 20px; }
 .review-finish p { margin: 10px 0; }
@@ -2205,7 +2232,9 @@ body.reviewing.review-source-focus .source-body { grid-template-columns: minmax(
   body.reviewing[data-reading-pane="context"] .source-side { display: flex; flex: 1; border: 0; }
   body.reviewing #error:not(.hidden), body.reviewing #connection-notice:not(.hidden), body.reviewing #worktree-notice:not(.hidden) { left: 8px; right: 8px; }
   .file-review-footer { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-  .file-review-footer label, .file-review-footer input { grid-column: 1 / -1; }
+  .file-review-footer label, .file-review-footer input, #file-review-status { grid-column: 1 / -1; }
+  .file-review-footer label select { flex: 1; }
+  #file-review-status:empty { display: none; }
 }
 .markdown-table-wrap { max-width: 100%; overflow-x: auto; margin: 8px 0; }
 .markdown-table { border-collapse: collapse; font-size: 12px; min-width: 100%; }

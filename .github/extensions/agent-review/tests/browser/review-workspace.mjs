@@ -34,6 +34,13 @@ try {
         assert.equal(await page.locator("#review-navigation").isVisible(), true);
         assert.ok((await page.locator("#review-navigation").boundingBox()).x < (await page.locator("#source-panel").boundingBox()).x);
         const title = await page.locator("#source-title").textContent();
+        await page.locator("#source").focus();
+        for (let press = 0; press < 2; press++) {
+            await page.keyboard.press("Escape");
+            assert.equal(await page.locator("#source-panel").isVisible(), true, "Esc never closes the file in Review");
+            assert.equal(await page.locator("#source-title").textContent(), title);
+            assert.equal(await page.locator("#source .focus-line").count(), 0, "Esc clears the highlighted range");
+        }
         await page.locator(".tab[data-tab='current']").click();
         await page.waitForFunction(() => document.querySelector("#source")?.getAttribute("aria-busy") !== "true");
         const position = await page.locator("#source").evaluate((source) => {
