@@ -4,6 +4,17 @@ import { reviewIdentity } from "./review-pipeline.mjs";
 import { REVIEW_DISPOSITIONS, fileReviewId, fileReviewProgress, isConcernSetAside, parseReviewLedger } from "./web/review-ledger.mjs";
 import { groupFindings } from "./web/findings.mjs";
 import { countLabel } from "./web/count-format.mjs";
+import { baseTestId, layerTestStatus } from "./web/decision-map.mjs";
+
+// One line per layer saying whether its linked tests were run in this review and how they came out.
+function layerTestLine(status) {
+    if (status.state === "none") return "Linked tests: none reach this layer's changed code.";
+    if (!status.ran) return `Linked tests: ${countLabel(status.linked, "linked test")}, ${status.state === "running" ? "running now; no result recorded yet" : "not run in this review"}.`;
+    const parts = ["passed", "failed", "error", "skipped"].filter((key) => status.counts[key]).map((key) => `${status.counts[key]} ${key}`);
+    if (status.counts.not_run) parts.push(`${status.counts.not_run} not run`);
+    return `Linked tests: ${parts.join(", ")} of ${status.linked}${status.stale ? " (STALE: worktree changed after the run)" : ""}${
+        status.state === "running" ? " (recorded before the run now in progress)" : ""}.`;
+}
 
 const text = (value) => String(value ?? "").replace(/[\\`*_{}[\]()#+!|<>]/g, "\\$&").replace(/\r?\n/g, " ");
 const code = (value) => {
@@ -21,7 +32,7 @@ export function handoffIdentity(model, target) {
         mode: target.mode }, source_files }, `review-handoff-v1:${JSON.stringify(changes)}`, null);
 }
 
-export function createReviewHandoff(model, target, progress, { testRun, warnings = model.warnings || [], layers = null, priority = null, comments = [] } = {}) {
+export function createReviewHandoff(model, target, progress, { testRun, warnings = model.warnings || [], layers = null, priority = null, comments = [], decisionMap = null } = {}) {
     const entries = new Map(Object.entries(progress.entries));
     const counts = fileReviewProgress(model, entries);
     const files = (model.changes || []).filter((file) => file.status !== "unchanged");
@@ -76,6 +87,7 @@ export function createReviewHandoff(model, target, progress, { testRun, warnings
             if (layer.title && layer.title !== layer.name) lines.push(`Area: ${text(layer.name)} · step title is AI-written`);
             if (layer.intent) lines.push(`AI summary (verify in code): ${text(layer.intent)}`);
             else if (layer.summary) lines.push(text(layer.summary));
+            if (decisionMap?.status === "complete") lines.push(layerTestLine(layerTestStatus(decisionMap, testRun, layer.files)));
             const remaining = layer.files.filter((path) => pendingPaths.has(path));
             if (remaining.length) lines.push(...pendingList(remaining));
         }
@@ -137,11 +149,27 @@ export function createReviewHandoff(model, target, progress, { testRun, warnings
         if (narrower.length > 20) lines.push(`- ${narrower.length - 20} additional scoped records are in the JSON state.`);
     }
     lines.push("", "## Verification and limits");
-    if (testRun?.status === "complete") {
+    const recorded = testRun?.status === "complete" || (testRun?.status === "running" && testRun.tests?.length);
+    if (recorded) {
         const results = ["passed", "failed", "error", "skipped"].map((key) => `${testRun.counts?.[key] || 0} ${key}`).join(", ");
-        lines.push(`- Repository linked-test outcomes: ${results}.${testRun.stale ? " STALE: worktree changed after this run." : ""}`,
+        const distinct = new Set((testRun.tests || []).map((test) => baseTestId(test.id))).size;
+        const cases = (testRun.tests || []).length > distinct ? ` across ${countLabel(distinct, "linked test")} (results count each parametrized case)` : "";
+        lines.push(`- Repository linked-test results: ${results}${cases}.${testRun.stale ? " STALE: worktree changed after this run." : ""}${
+            testRun.status === "running" ? " A test run is in progress; these are the results recorded before it started." : ""}`,
             "- Repository test outcomes are not per-path proof; inspect named-test traces separately where supported.");
     } else lines.push(`- No completed linked-test result is recorded (${text(testRun?.status || "not run")}). No tests were run by exporting this handoff.`);
+    const runs = testRun?.history || [];
+    if (runs.length) {
+        lines.push(`- Test runs in this review (most recent last${runs.length > 10 ? `; ${runs.length - 10} earlier omitted` : ""}):`);
+        for (const run of runs.slice(-10)) {
+            const scope = run.scope ? `Layer ${run.scope.number ? `${run.scope.number}. ` : ""}${text(run.scope.name || run.scope.id)}` : "All linked tests";
+            const outcome = run.status === "complete"
+                ? `${["passed", "failed", "error", "skipped"].filter((key) => run.counts?.[key]).map((key) => `${run.counts[key]} ${key}`).join(", ") || "no tests ran"}${
+                    run.cases > run.planned ? " (parametrized cases count separately)" : ""}`
+                : run.status === "error" ? `error: ${text(run.error || "see Agent Review")}` : text(run.status);
+            lines.push(`  - ${scope}: ${outcome} · ${countLabel(run.planned || 0, "linked test")} planned · ${text(run.finished_at || "")}`);
+        }
+    }
     lines.push(`- Aggregate coverage report: ${model.coverage?.available ? "available; not named-test or per-path proof" : "not available"}.`,
         `- ${countLabel(allConcerns.length, "saved review concern")} (${concerns.length} open), not confirmed defects. Concern triage saved in this session is included above; dismissals made only in the browser are not.`,
         `- ${countLabel(warnings.length, "saved analyzer limitation")}. AI explanations are interpretations, not proof.`,

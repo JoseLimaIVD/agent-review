@@ -20,7 +20,7 @@ import {
 } from "/review-ledger.mjs";
 import {
     callableName, callablesForSubject, changedCallables, decisionAction, decisionConditions, decisionSentence, decisionTotals,
-    EVIDENCE_GROUPS, evidenceCounts, linkedTestOutcome, pathEvidence,
+    EVIDENCE_GROUPS, baseTestId, evidenceCounts, layerTestStatus, linkedTestOutcome, pathEvidence, scopeDecisionMap,
 } from "/decision-map.mjs";
 
 const state = {
@@ -417,6 +417,8 @@ function renderWorkspaceNavigation() {
             }
             const progress = el("span", "workspace-layer-progress muted");
             progress.dataset.layerProgress = layer.id;
+            const tests = el("span", "workspace-layer-tests");
+            tests.dataset.layerTests = layer.id;
             const intent = state.payload.annotations?.layers?.intents?.[layer.id];
             let intentLine = null;
             if (intent) {
@@ -424,7 +426,7 @@ function renderWorkspaceNavigation() {
                 intentLine.append(el("span", "workspace-layer-ai", "AI"), document.createTextNode(intent));
                 intentLine.title = `${intent}\n\nAI interpretation of this layer's saved diff. Verify in the code.`;
             } else if (layer.summary) intentLine = el("span", "workspace-layer-intent workspace-layer-fallback", layer.summary);
-            heading.append(name, progress, ...(intentLine ? [intentLine] : []), meta);
+            heading.append(name, progress, tests, ...(intentLine ? [intentLine] : []), meta);
             section.append(heading);
             for (const { entry, files } of layerGroups) {
                 if (entry.supporting) {
@@ -531,6 +533,11 @@ function renderWorkspaceNavigation() {
         const files = entry?.groups.flatMap((group) => group.files) || [];
         count.textContent = `${reviewedIn(files)}/${files.length}`;
         count.title = `${reviewedIn(files)} of ${countLabel(files.length, "file")} in this layer marked reviewed`;
+    }
+    for (const slot of elements.workspace_nav_list.querySelectorAll("[data-layer-tests]")) {
+        const entry = navigation.layers.find((layer) => layer.id === slot.dataset.layerTests);
+        const chip = entry && layerTestChip(entry);
+        slot.replaceChildren(...(chip ? [chip] : []));
     }
 }
 
@@ -1242,7 +1249,7 @@ function concernPriority(finding) {
     const payload = state.payload;
     const model = payload?.model;
     if (!model) return finding.impact_score ?? null;
-    const key = `${payload.review_generation}:${payload.decision_map?.status || ""}:${payload.test_run?.completed_at || payload.test_run?.status || ""}:${(payload.generated_observations || []).length}`;
+    const key = `${payload.review_generation}:${payload.decision_map?.status || ""}:${payload.test_run?.finished_at || ""}:${payload.test_run?.status || ""}:${(payload.generated_observations || []).length}`;
     if (state.priorityKey !== key) {
         state.priorityKey = key;
         state.priorityOf = concernPriorities(buildReviewPlan(model, payload.decision_map, payload.test_run,
@@ -1725,8 +1732,10 @@ function renderFinishReview() {
             const row = el("button", `overview-layer${layer.supporting ? " is-supporting" : ""}`);
             row.type = "button";
             const name = layerHeading(layer, { path: false });
-            row.append(el("span", "overview-layer-number", layer.number ? String(layer.number) : "·"), name,
-                el("span", "overview-layer-progress", `${progress.reviewed}/${progress.total} reviewed`));
+            const progressCell = el("span", "overview-layer-progress", `${progress.reviewed}/${progress.total} reviewed`);
+            const tests = layerTestChip(layer);
+            if (tests) progressCell.append(tests);
+            row.append(el("span", "overview-layer-number", layer.number ? String(layer.number) : "·"), name, progressCell);
             row.addEventListener("click", () => openLayer(navigation, layer));
             const item = el("li", "");
             item.append(row);
@@ -1744,9 +1753,15 @@ function renderFinishReview() {
     panel.append(el("p", "", `${countLabel(activeCount, "active concern")} ${plural(activeCount, "remains", "remain")}${
         setAside ? ` · ${countLabel(setAside, "concern")} set aside as accepted risk or false positive` : ""}.`));
     const tests = state.payload.test_run;
-    panel.append(el("p", "muted", tests?.status === "complete"
-        ? `Linked-test run completed: ${tests.counts?.passed || 0} passed, ${tests.counts?.failed || 0} failed. This is separate from human review.`
-        : "No completed linked-test run is recorded for this view. Coverage and AI analysis retain their own evidence limits."));
+    const distinctTests = new Set((tests?.tests || []).map((test) => baseTestId(test.id))).size;
+    const caseNote = (tests?.tests || []).length > distinctTests ? ` (results across ${countLabel(distinctTests, "linked test")}; each parametrized case is a result)` : "";
+    panel.append(el("p", "muted", tests?.tests?.length && ["complete", "running"].includes(tests.status)
+        ? `Linked-test results so far: ${tests.counts?.passed || 0} passed, ${(tests.counts?.failed || 0) + (tests.counts?.error || 0)} failed${
+            tests.counts?.skipped ? `, ${tests.counts.skipped} skipped` : ""}${caseNote}${
+            tests.status === "running" ? "; a run is in progress" : ""}. Each layer's outcome is shown beside it. This is separate from human review.`
+        : tests?.status === "complete"
+            ? `Linked-test run completed: ${tests.counts?.passed || 0} passed, ${tests.counts?.failed || 0} failed. This is separate from human review.`
+            : "No completed linked-test run is recorded for this view. Coverage and AI analysis retain their own evidence limits."));
     const list = el("div", "finish-files");
     const fileButton = (file, group) => {
         const record = state.reviewLedger.get(fileReviewId(file.path));
@@ -4479,7 +4494,8 @@ async function renderSource({ preserveScroll = false } = {}) {
     lines.classList.toggle("old-lines-only", oldNumbers && !newNumbers);
     const largestLine = rows.reduce((largest, row) =>
         Math.max(largest, Number(row.dataset?.oldLine) || 0, Number(row.dataset?.newLine) || 0), 0);
-    lines.style.setProperty("--source-line-digits", String(Math.max(2, String(largestLine).length)));
+    lines.dataset.lineDigits = String(Math.max(2, String(largestLine).length));
+    lines.style.setProperty("--source-line-digits", lines.dataset.lineDigits);
     lines.classList.toggle("split-diff", splitRendering);
     if (!reused) {
         const units = splitRendering ? splitDiffUnits(rows) : rows;
@@ -4539,6 +4555,186 @@ async function renderSource({ preserveScroll = false } = {}) {
     }
     queueReviewCursor();
     return true;
+}
+
+// ---- Per-layer verification: run the linked tests of the layer being read, beside the code ----
+
+const layerPaths = (layer) => [...new Set(layer.groups.flatMap((group) => group.files.map((file) => file.path)))];
+// The deterministic area name labels runs, so the run history reads the same before and after AI step titles load.
+const layerScope = (layer) => ({ id: layer.id, name: layer.name, number: layer.number || null, paths: layerPaths(layer) });
+const layerTests = (layer) => layerTestStatus(state.payload?.decision_map, state.payload?.test_run, layerPaths(layer));
+
+function currentReadingLayer() {
+    const navigation = state.workspaceNavigation;
+    return state.source && navigation ? layerOf(navigation, { path: state.source.path }) : null;
+}
+
+function layerPlanFor(layer) {
+    const payload = state.payload;
+    const key = [payload?.review_generation, Boolean(payload?.worktree_changed), payload?.decision_map?.status, payload?.decision_map?.total_ms, layer.id].join(":");
+    state.layerPlans ||= new Map();
+    const cached = state.layerPlans.get(key);
+    if (cached) return cached.plan;
+    state.layerPlans.set(key, { plan: null });
+    api("/api/test-run/plan", { method: "POST", body: JSON.stringify({ layer: layerScope(layer) }) })
+        .then((plan) => { state.layerPlans.set(key, { plan }); renderReviewContext(); })
+        .catch((error) => { state.layerPlans.set(key, { plan: { available: false, reason: error.message } }); renderReviewContext(); });
+    return null;
+}
+
+function layerTestSummary(status) {
+    if (status.state === "running") return `${countLabel(status.linked, "linked test")} · running${
+        status.ran ? ` (before this run: ${layerTestSummary({ ...status, state: status.outcome })})` : ""}`;
+    if (status.state === "not-run") return `${countLabel(status.linked, "linked test")} · not run`;
+    const parts = ["passed", "failed", "error", "skipped"].filter((key) => status.counts[key]).map((key) => `${status.counts[key]} ${key}`);
+    if (status.counts.not_run) parts.push(`${status.counts.not_run} not run`);
+    return `${parts.join(" · ")}${status.stale ? " · stale" : ""}`;
+}
+
+// A compact status chip for rails and lists; nothing when the layer has no linked tests. Only fresh, all-passing results get a ✓.
+function layerTestChip(layer) {
+    const status = layerTests(layer);
+    if (!["running", "not-run", "passed", "failing", "partial", "skipped"].includes(status.state)) return null;
+    const kind = status.stale && status.state !== "running" ? "stale" : status.state;
+    const text = status.state === "running" ? "Testing…"
+        : status.state === "failing" ? `✗ ${status.counts.failed + status.counts.error} failing`
+        : status.stale ? `${status.ran}/${status.linked} tested · stale`
+        : status.state === "passed" ? `✓ ${status.counts.passed} passed`
+        : status.state === "skipped" ? `${status.counts.passed} passed · ${status.counts.skipped} skipped`
+        : status.state === "partial" ? `${status.ran}/${status.linked} tested` : `${status.linked} tests`;
+    const chip = el("span", `layer-tests layer-tests-${kind}`, text);
+    chip.title = `Linked tests for this layer: ${layerTestSummary(status)}. Run them from "What was verified?" beside the code.`;
+    return chip;
+}
+
+function layerVerifyBlock(layer) {
+    const block = el("div", "layer-verify");
+    block.setAttribute("aria-live", "polite");
+    const status = layerTests(layer);
+    const label = layerLabel(layer);
+    if (status.state === "loading") {
+        block.append(el("p", "muted", `Finding the tests linked to ${label}…`));
+        return block;
+    }
+    if (status.state === "unavailable") {
+        block.append(el("p", "muted", state.payload?.decision_map?.status === "error"
+            ? "Linked tests are unavailable because code-path analysis failed."
+            : "Linked tests are unavailable for this review (no code-path test links)."));
+        return block;
+    }
+    if (status.state === "none") {
+        block.append(el("p", "", `No linked tests reach the changed code in ${label}.`));
+        return block;
+    }
+    const run = state.payload?.test_run;
+    const plan = layerPlanFor(layer);
+    const head = el("p", "layer-verify-status");
+    head.append(el("strong", "", `${label}: `), layerTestSummary(status));
+    block.append(head);
+    const last = [...(run?.history || [])].reverse().find((entry) => entry.scope?.id === layer.id);
+    if (last && ["error", "cancelled"].includes(last.status) && status.state !== "running") {
+        block.append(el("p", last.status === "error" ? "error" : "muted", last.status === "error"
+            ? `The last run of this layer's tests failed to complete: ${last.error || "see the test output in Explore → Code paths."}` : "The last run of this layer's tests was cancelled."));
+    }
+    const failing = (scopeDecisionMap(state.payload.decision_map, layerPaths(layer)).verification?.tests || [])
+        .filter((test) => ["failed", "error"].includes(linkedTestOutcome(run, test.id)));
+    if (failing.length) {
+        const list = el("ul", "layer-verify-failing");
+        for (const test of failing.slice(0, 5)) {
+            const item = el("li", "");
+            const open = el("button", "link-button", `${test.name} ${linkedTestOutcome(run, test.id)}`);
+            open.type = "button";
+            open.title = `Open ${test.path}:${test.line}`;
+            open.addEventListener("click", async () => {
+                const epoch = ++state.selectionEpoch;
+                try {
+                    if (await loadSource(`path=${encodeURIComponent(test.path)}&line=${test.line}&side=current`, epoch, "current", "reset")
+                        && epoch === state.selectionEpoch) elements.source.focus({ preventScroll: true });
+                } catch (error) { if (epoch === state.selectionEpoch) showError(error); }
+            });
+            item.append(open);
+            list.append(item);
+        }
+        block.append(list);
+    }
+    const actions = el("div", "layer-verify-actions");
+    const running = run?.status === "running";
+    const button = el("button", "layer-verify-run", status.state === "running" ? "Running…"
+        : status.state === "not-run" ? `Run ${countLabel(status.linked, "linked test")}` : "Rerun this layer's tests");
+    button.type = "button";
+    button.dataset.focusKey = "run";
+    button.disabled = running || !plan?.available;
+    button.title = plan?.available ? plan.command : plan?.reason || "Checking the linked tests…";
+    button.addEventListener("click", async () => {
+        // Re-renders replace these controls; keep keyboard focus on the equivalent control (Cancel while running).
+        state.layerVerifyFocus = "cancel";
+        button.disabled = true;
+        try { await api("/api/test-run", { method: "POST", body: JSON.stringify({ layer: layerScope(layer) }) }); }
+        catch (error) { state.layerVerifyFocus = null; showError(error); button.disabled = false; }
+    });
+    actions.append(button);
+    if (running) {
+        const cancel = el("button", "link-button", "Cancel");
+        cancel.type = "button";
+        cancel.dataset.focusKey = "cancel";
+        cancel.addEventListener("click", () => {
+            state.layerVerifyFocus = "run";
+            api("/api/test-run/cancel", { method: "POST", body: "{}" }).catch(showError);
+        });
+        actions.append(cancel);
+    }
+    block.append(actions);
+    const traced = plan && !["csharp", "rust"].includes(plan.adapter_id);
+    if (traced && status.ran && !status.stale) {
+        const legend = el("p", "muted layer-verify-note trace-legend");
+        for (const [kind, text] of [["passed", "a linked test ran this changed path"], ["missed", "no linked test reached it"], ["failing", "only failing tests ran it"]]) {
+            const item = el("span", "");
+            item.append(el("span", `trace-dot trace-dot-${kind}`), text);
+            legend.append(item);
+        }
+        block.append(legend);
+    }
+    block.append(el("p", "muted layer-verify-note", running
+        ? `${run.scope?.id === layer.id ? "Running" : `Running ${run.scope ? layerLabel(state.workspaceNavigation?.layers.find((item) => item.id === run.scope.id)) || "another layer" : "all linked tests"}:`} ${
+            countLabel(run.planned || 0, "test")} in ${run.location || "the worktree"}. Usually under a minute; you can keep reading.`
+        : plan?.available ? `Runs in ${plan.location} and executes repository code.${traced ? " Changed code-path lines a linked test executed are marked in the gutter." : " Records outcomes; this language has no per-line trace."}`
+            : plan?.reason || "Checking the linked tests…"));
+    return block;
+}
+
+// Gutter marks on changed code paths that a linked test run executed (green), only failing tests executed (red), or did not reach.
+function renderTestTrace() {
+    for (const cell of elements.source.querySelectorAll(".line-number[data-trace]")) {
+        cell.removeAttribute("data-trace");
+        cell.removeAttribute("title");
+    }
+    const run = state.payload?.test_run;
+    const map = state.payload?.decision_map;
+    const source = state.source;
+    const lines = elements.source.querySelector(".code-lines");
+    // Trace dots sit left of the line number; widen the number column while any are shown so digits stay readable.
+    const widen = (marked) => { if (lines?.dataset.lineDigits) lines.style.setProperty("--source-line-digits", String(Number(lines.dataset.lineDigits) + (marked ? 1.5 : 0))); };
+    widen(false);
+    if (!source || map?.status !== "complete" || !["complete", "running"].includes(run?.status) || !run?.executed || run.stale || elements.source.getAttribute("aria-busy") === "true") return;
+    let marked = 0;
+    for (const callable of (map.callables || []).filter((item) => item.path === source.path)) {
+        if (!run.ran?.[callable.id]) continue;
+        for (const entry of callable.entries || []) {
+            if (entry.status === "removed" || entry.decision.implicit) continue;
+            const hits = run.executed[`${callable.id}:${entry.decision.line}`];
+            if (hits === undefined || hits === null) continue;
+            const row = commentRow(entry.decision.line, "RIGHT");
+            const cell = row?.children[1]?.classList.contains("line-number") ? row.children[1] : row?.querySelector(".line-number");
+            if (!cell) continue;
+            const failing = hits.length && hits.every((hit) => hit.outcome !== "passed");
+            cell.dataset.trace = !hits.length ? "missed" : failing ? "failing" : "passed";
+            marked++;
+            const names = hits.map((hit) => hit.id.split("::").at(-1));
+            cell.title = !hits.length ? `Line ${entry.decision.line}: no linked test executed this code path`
+                : `Line ${entry.decision.line}: executed by ${names.slice(0, 3).join(", ")}${names.length > 3 ? ` and ${names.length - 3} more` : ""} (${failing ? "failing" : "passed"})`;
+        }
+    }
+    widen(marked > 0);
 }
 
 // ---- Line comments: GitHub threads (read-only) and local drafts that post with the reviewer's review ----
@@ -5020,7 +5216,8 @@ function openReviewPlanItem(item) {
         return;
     }
     if (item.kind === "callable" && item.preferred) {
-        openDecision(item.callable, item.preferred.entry);
+        rememberSourceReturnFocus();
+        openDecision(item.callable, item.preferred.entry, { focus: true });
         return;
     }
     selectItem(item.finding || item.node, false);
@@ -5329,7 +5526,7 @@ function decisionCounts(item) {
     return counts;
 }
 
-async function openDecision(callable, entry, { select = true } = {}) {
+async function openDecision(callable, entry, { select = true, focus = false } = {}) {
     const node = state.payload?.model?.nodes.find((candidate) => candidate.id === callable.id);
     if (select && node) {
         state.selected = node;
@@ -5341,7 +5538,9 @@ async function openDecision(callable, entry, { select = true } = {}) {
     const side = entry.status === "removed" ? "base" : "current";
     const query = `path=${encodeURIComponent(callable.path)}&line=${decision.line}&end=${decision.end_line || decision.line}&side=${side}`;
     try {
-        if (await loadSource(query, epoch, side, select ? "reset" : "push") && state.selected) ensureAnnotation(state.selected, epoch);
+        const loaded = await loadSource(query, epoch, side, select ? "reset" : "push");
+        if (loaded && state.selected) ensureAnnotation(state.selected, epoch);
+        if (loaded && focus && epoch === state.selectionEpoch) elements.source.focus({ preventScroll: true });
     } catch (error) {
         if (epoch === state.selectionEpoch) showError(error);
     }
@@ -5460,7 +5659,15 @@ function testPlanFor(generation) {
                 state.sourceDecisionsKey = null;
                 renderSourceDecisions();
             }
-        }).catch((error) => { state.testPlan = { generation, plan: { available: false, reason: error.message } }; });
+        }).catch((error) => {
+            if (state.testPlan?.generation !== generation) return;
+            state.testPlan = { generation, plan: { available: false, reason: error.message } };
+            if (state.mode === "decisions") render();
+            if (!elements.source_panel.classList.contains("hidden")) {
+                state.sourceDecisionsKey = null;
+                renderSourceDecisions();
+            }
+        });
     }
     return null;
 }
@@ -5668,6 +5875,8 @@ function renderSourceRisk() {
 
 function renderReviewContext() {
     const panel = elements.source_review_context;
+    // Re-renders replace the verify controls; remember which one had keyboard focus so it can be restored.
+    const held = panel.contains(document.activeElement) ? document.activeElement.dataset?.focusKey || null : null;
     panel.replaceChildren();
     panel.classList.toggle("hidden", !state.source);
     if (!state.source || !state.payload?.model) return;
@@ -5693,12 +5902,24 @@ function renderReviewContext() {
     impact.type = "button";
     impact.addEventListener("click", () => elements.source_impact.click());
     affected.append(impact);
-    section("What was verified?", context.verification);
+    const verified = section("What was verified?", context.verification);
+    const layer = currentReadingLayer();
+    if (layer && (state.payload.model.changes || []).some((change) => change.path === state.source.path)) verified.prepend(verified.firstChild, layerVerifyBlock(layer));
     section("What remains open?", context.gaps.length ? context.gaps : ["No additional gaps were recorded for this selection; this is not a correctness guarantee."]);
+    const wanted = state.layerVerifyFocus || held;
+    if (wanted && (document.activeElement === document.body || panel.contains(document.activeElement))) {
+        const target = [panel.querySelector(`[data-focus-key="${wanted}"]`), panel.querySelector('[data-focus-key="cancel"]'), panel.querySelector('[data-focus-key="run"]')]
+            .find((node) => node && !node.disabled);
+        if (target) {
+            target.focus({ preventScroll: true });
+            state.layerVerifyFocus = null;
+        }
+    }
 }
 
 function renderSourceDecisions() {
     renderReviewContext();
+    renderTestTrace();
     const panel = elements.source_decisions;
     const map = state.payload?.decision_map;
     const model = state.payload?.model;

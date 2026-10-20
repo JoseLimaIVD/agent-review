@@ -17,7 +17,7 @@ import { resolveReviewTarget } from "./review-target.mjs";
 import { buildSessionContext, findSessionAttribution, mergeSessionContexts } from "./session-context.mjs";
 import { spawnOwnedAnalyzer } from "./ownership-guard.mjs";
 import { fingerprintWorktree } from "./worktree-changes.mjs";
-import { callablesForSubject, decisionPromptContext } from "./web/decision-map.mjs";
+import { callablesForSubject, decisionPromptContext, mergeTestRuns, scopeDecisionMap } from "./web/decision-map.mjs";
 import { exportSnapshot, mapExecutedPaths } from "./test-run.mjs";
 import { repositoryRuleSources, RULES_PROMPT, RULE_EVIDENCE_OPTIONS, ruleCheckContext } from "./review-contracts.mjs";
 import { buildCodePathRequests, mergeCodePathMaps, reviewAdapter, sourceAdapter, testAdapterForMap } from "./language-adapters.mjs";
@@ -520,8 +520,8 @@ export class ReviewState {
         const drafts = await this.reviewDrafts();
         const pr = target.mode === "pr" && Boolean(target.url);
         // On a PR the drafted comments are posted inline; elsewhere they travel in the summary.
-        const result = createReviewHandoff(model, target, progress, { testRun: this.testRun, layers: this.handoffLayers(model), priority,
-            comments: pr ? [] : drafts.comments });
+        const result = createReviewHandoff(model, target, progress, { testRun: run, layers: this.handoffLayers(model), priority,
+            comments: pr ? [] : drafts.comments, decisionMap: this.decisionMap });
         const token = randomUUID();
         let author = null, viewer = null, head = null, prState = null;
         if (pr) { try { ({ author, viewer, head, state: prState } = await this.pullRequestInfo({ fresh: true })); } catch { /* reported at submission */ } }
@@ -1102,12 +1102,29 @@ export class ReviewState {
         return this.decisionMap;
     }
 
-    async testRunPlan() {
-        const adapter = testAdapterForMap(this.decisionMap);
-        const plan = adapter.tests.plan(this.decisionMap, this.repoRoot);
+    // A layer scope is the reader's current layer: a bounded list of changed files from this review.
+    testRunScope(layer) {
+        if (!layer) return null;
+        const changed = new Set((this.model?.changes || []).filter((change) => change.status !== "unchanged").map((change) => change.path));
+        const paths = Array.isArray(layer.paths) ? [...new Set(layer.paths)] : [];
+        if (!paths.length || paths.length > 2000 || paths.some((path) => typeof path !== "string" || !changed.has(path))) {
+            throw new Error("A layer run needs changed files from this review.");
+        }
+        const text = (value, limit) => typeof value === "string" ? value.slice(0, limit) : "";
+        return { id: text(layer.id, 200), name: text(layer.name, 200), number: Number.isInteger(layer.number) ? layer.number : null, paths };
+    }
+
+    async testRunPlan({ layer = null } = {}) {
+        const scope = this.testRunScope(layer);
+        const map = scope ? scopeDecisionMap(this.decisionMap, scope.paths) : this.decisionMap;
+        const adapter = testAdapterForMap(map);
+        const plan = adapter.tests.plan(map, this.repoRoot);
         const python = adapter.tests.resolveRuntime(this.repoRoot, await loadReviewConfig(this.repoRoot));
         const worktree = this.reviewTarget.mode === "worktree";
-        let reason = plan.reason;
+        // Say "no linked tests" only when none exist; otherwise keep the runner's own reason (for example an unsupported test shape).
+        const linked = (map?.verification?.tests || []).filter((test) => test.link !== "name-only").length;
+        let reason = scope && map?.status === "complete" && !linked ? "No linked tests reach this layer's changed code."
+            : plan.reason || (!plan.tests.length ? "No runnable linked tests were planned." : null);
         if (this.loading) reason = "Wait for the analysis to finish.";
         else if (worktree && this.worktreeChanged) reason = "The worktree changed since this review. Reanalyze before running linked tests.";
         else if (!worktree && !this.reviewTarget.currentRef) reason = "This snapshot has no commit to export for testing.";
@@ -1115,15 +1132,23 @@ export class ReviewState {
             command: adapter.tests.formatCommand ? adapter.tests.formatCommand(python, plan)
                 : adapter.tests.command(python, plan).join(" "),
             location: worktree ? "the worktree" : `a temporary export of ${this.reviewTarget.label || this.reviewTarget.currentRef.slice(0, 7)}`,
-            available: !reason, reason };
+            scope, available: !reason, reason };
     }
 
     stopTestRun() {
         this.testRunController?.abort(new DOMException("Test run cancelled.", "AbortError"));
         this.testRunController = null;
         if (this.testRun?.status === "running") {
-            this.testRun = { ...this.testRun, status: "cancelled", finished_at: new Date().toISOString() };
+            const kept = this.testRunPrevious;
+            const finished_at = new Date().toISOString();
+            const { tests, executed, ran, counts, path_evidence_limitation, history, ...fields } = this.testRun;
+            const cancelled = { ...fields, status: "cancelled", finished_at };
+            const entry = kept?.record ? kept.record(cancelled) : null;
+            // Cancelling keeps what earlier runs established for this snapshot.
+            this.testRun = kept?.run ? { ...kept.run, history: [...(kept.history || []), ...(entry ? [entry] : [])] }
+                : { ...cancelled, history: [...(kept?.history || history || []), ...(entry ? [entry] : [])] };
         }
+        this.testRunPrevious = null;
     }
 
     // Only a worktree run can go stale: commit and PR snapshots are immutable.
@@ -1141,34 +1166,52 @@ export class ReviewState {
         return this.testRun;
     }
 
-    // Explicit user action: executes the repository's tests, so it never starts automatically.
-    async runLinkedTests() {
+    // Explicit user action: executes the repository's tests, so it never starts automatically. With a layer, only the
+    // tests linked to that layer run, and their results join earlier results for this snapshot.
+    async runLinkedTests({ layer = null } = {}) {
         if (this.disposed) throw new Error("This review has been closed.");
         if (this.testRun?.status === "running" || this.testRunStarting) throw new Error("Linked tests are already running.");
         // Marked before any await so concurrent requests cannot both start a run.
         this.testRunStarting = true;
-        const map = this.decisionMap;
+        const fullMap = this.decisionMap;
         const generation = this.reviewGeneration;
         let plan;
         let python;
         let adapter;
+        let scope;
+        let map;
         try {
-            plan = await this.testRunPlan();
+            scope = this.testRunScope(layer);
+            map = scope ? scopeDecisionMap(fullMap, scope.paths) : fullMap;
+            plan = await this.testRunPlan({ layer });
             if (!plan.available) throw new Error(plan.reason);
             adapter = testAdapterForMap(map);
             python = adapter.tests.resolveRuntime(this.repoRoot, await loadReviewConfig(this.repoRoot));
             if (this.disposed || this.loading || this.refreshPromise || generation !== this.reviewGeneration
-                || this.decisionMap !== map || this.testRunStale()) {
+                || this.decisionMap !== fullMap || this.testRunStale()) {
                 throw new Error("The review changed before the linked tests could start. Try again.");
             }
         } finally {
             this.testRunStarting = false;
         }
+        const previousRun = this.testRun;
+        // Every run, full or per layer, builds on what earlier runs of this snapshot established; a cancel or error keeps it.
+        const prior = previousRun && previousRun.status !== "running" && !this.testRunStale() ? previousRun : null;
+        const previous = prior?.status === "complete" ? prior : null;
+        const history = prior?.history || [];
+        const plannedIds = [...new Set([...plan.tests, ...(map?.verification?.tests || []).filter((test) => test.link !== "name-only").map((test) => test.id)])];
         const controller = new AbortController();
         this.testRunController = controller;
         const snapshotRef = this.reviewTarget.mode === "worktree" ? null : this.reviewTarget.currentRef;
-        const run = { status: "running", started_at: new Date().toISOString(), command: plan.command, location: plan.location,
-            python: plan.python, python_source: plan.python_source, planned: plan.tests.length, omitted: plan.omitted };
+        const fields = { started_at: new Date().toISOString(), command: plan.command, location: plan.location,
+            python: plan.python, python_source: plan.python_source, planned: plan.tests.length, omitted: plan.omitted, scope };
+        const evidence = previous ? { tests: previous.tests, executed: previous.executed, ran: previous.ran, counts: previous.counts,
+            ...(previous.path_evidence_limitation ? { path_evidence_limitation: previous.path_evidence_limitation } : {}) } : {};
+        const run = { ...evidence, history, status: "running", ...fields };
+        const record = (outcome) => ({ scope: scope ? { id: scope.id, name: scope.name, number: scope.number, files: scope.paths.length } : null,
+            status: outcome.status, finished_at: outcome.finished_at, planned: plan.tests.length, ...(outcome.tests ? { cases: outcome.tests.length } : {}),
+            ...(outcome.counts ? { counts: outcome.counts } : {}), ...(outcome.error ? { error: outcome.error.split("\n")[0] } : {}) });
+        this.testRunPrevious = { run: previous, history, record };
         this.testRun = run;
         this.broadcast("test-run");
         this.testRunPromise = (async () => {
@@ -1187,17 +1230,23 @@ export class ReviewState {
                     id, outcome: record.outcome, duration_ms: record.duration_ms }));
                 const { executed, ran } = result.trace.per_test_path_evidence === false
                     ? { executed: {}, ran: {} } : mapExecutedPaths(map, result.trace, root);
-                return { ...run, status: "complete", finished_at: new Date().toISOString(), exit_code: result.exit_code,
+                const own = { status: "complete", ...fields, finished_at: new Date().toISOString(), exit_code: result.exit_code,
                     output: result.output, tests: results, executed, ran,
                     ...(result.path_evidence_limitation ? { path_evidence_limitation: result.path_evidence_limitation } : {}),
                     counts: Object.fromEntries(["passed", "failed", "error", "skipped"].map((outcome) =>
                         [outcome, results.filter((test) => test.outcome === outcome).length])) };
-            }, (error) => controller.signal.aborted
-                ? { ...run, status: "cancelled", finished_at: new Date().toISOString() }
-                : { ...run, status: "error", finished_at: new Date().toISOString(), error: error.message })
+                return { ...(previous ? mergeTestRuns(previous, own, plannedIds) : own), history: [...history, record(own)] };
+            }, (error) => {
+                const failed = controller.signal.aborted
+                    ? { status: "cancelled", ...fields, finished_at: new Date().toISOString() }
+                    : { status: "error", ...fields, finished_at: new Date().toISOString(), error: error.message };
+                // A failed or cancelled run keeps the evidence earlier runs established and records what happened.
+                return previous ? { ...previous, history: [...history, record(failed)] } : { ...failed, history: [...history, record(failed)] };
+            })
             .then((outcome) => {
                 if (this.testRunController === controller) this.testRunController = null;
                 if (this.disposed || generation !== this.reviewGeneration || this.testRun !== run) return outcome;
+                this.testRunPrevious = null;
                 this.testRun = outcome;
                 this.saveCurrentReview();
                 this.broadcast("test-run");

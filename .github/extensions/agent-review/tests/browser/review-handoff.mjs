@@ -55,7 +55,7 @@ try {
         const markdownDownload = page.waitForEvent("download");
         await page.locator("#handoff-markdown-save").click();
         const markdown = await contents(await markdownDownload);
-        assert.match(markdown, /No completed linked-test result/);
+        assert.match(markdown, /No completed linked-test result|Repository linked-test results: /);
         assert.doesNotMatch(markdown, /127\.0\.0\.1/);
         const stateDownload = page.waitForEvent("download");
         await page.locator("#handoff-state-save").click();

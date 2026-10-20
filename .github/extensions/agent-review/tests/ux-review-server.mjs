@@ -46,6 +46,8 @@ if (process.env.AGENT_REVIEW_UX_MODEL) {
     const requested = process.env.AGENT_REVIEW_UX_TARGET ? JSON.parse(process.env.AGENT_REVIEW_UX_TARGET) : null;
     state.reviewTarget = { ...await resolveReviewTarget(repo, requested || { mode: worktree ? "worktree" : "commit", ref: state.model.metadata.head_sha }),
         baseRef: state.model.metadata.base_sha };
+    // The product extracts code paths and test links after analysis; a saved model needs the same step.
+    state.startDecisionMap();
 } else if (process.env.AGENT_REVIEW_UX_TARGET) {
     // Open a specific target (for example {"mode":"pr","ref":"1"}) instead of the worktree.
     await state.setReviewTarget(JSON.parse(process.env.AGENT_REVIEW_UX_TARGET));

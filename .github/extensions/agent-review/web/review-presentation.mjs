@@ -1,4 +1,4 @@
-import { callablesForSubject, evidenceCounts, pathEvidence } from "./decision-map.mjs";
+import { baseTestId, callablesForSubject, evidenceCounts, pathEvidence } from "./decision-map.mjs";
 import { impactSlice } from "./impact-model.mjs";
 import { countLabel } from "./count-format.mjs";
 
@@ -45,10 +45,13 @@ export function reviewContext(model, { path, selected, decisionMap, run, annotat
     const counts = evidenceCounts({ callables }, run);
     const coverage = model.coverage?.available && model.coverage.changed_lines?.[path];
     const verification = [];
-    if (run?.status === "complete") {
+    if (run?.status === "complete" || (run?.status === "running" && run.tests?.length)) {
         const outcomes = ["passed", "failed", "error", "skipped"].filter((key) => run.counts?.[key])
             .map((key) => `${run.counts[key]} ${key}`).join(", ");
-        verification.push(`Repository linked-test run: ${outcomes || "no outcomes recorded"}${run.stale ? " (stale)" : ""}. Run outcomes alone do not prove this path executed.`);
+        const distinct = new Set((run.tests || []).map((test) => baseTestId(test.id))).size;
+        const cases = (run.tests || []).length > distinct ? ` across ${countLabel(distinct, "linked test")} (results count each parametrized case)` : "";
+        verification.push(`Repository linked-test results: ${outcomes || "no outcomes recorded"}${cases}${run.stale ? " (stale)" : ""}${
+            run.status === "running" ? "; another run is in progress" : ""}. Run outcomes alone do not prove this path executed.`);
     } else verification.push(run?.status === "running" ? "Linked tests are running; no completed result yet."
         : run?.status === "error" ? `Linked-test run failed: ${run.error || "inspect the test output."}`
         : run?.status === "cancelled" ? "Linked-test run was cancelled." : "No linked-test run is recorded for this review.");

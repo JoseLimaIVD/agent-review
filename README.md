@@ -141,6 +141,16 @@ after linked tests run and opens the highest-risk unreviewed or follow-up path
 directly in source. The architecture graph remains available for exploratory
 drill-down.
 
+**Verify a layer.** Beside the code, *What was verified?* offers to run just the
+current layer's linked tests (an explicit action that executes repository code,
+in the worktree or a disposable snapshot export). Results from successive layers
+accumulate for the snapshot: the rail and Finish show each layer's outcome, and
+where the language supports per-test line tracing, gutter dots mark the changed
+code paths a linked test executed, reached only through failing tests, or never
+reached. Cancelling or a failed layer run keeps the earlier evidence. Because a
+layer is usually one language, this also verifies mixed-language reviews layer
+by layer. The handoff lists each layer's linked-test outcome and every run.
+
 ### Follow architecture and impact
 
 Drill from components to modules, classes, functions, and relationships. Added,
@@ -938,7 +948,8 @@ export. Runs are cancellable and report per-test outcomes. Cargo may download
 dependencies, compile and execute build scripts/procedural macros, build code,
 and execute repository tests; snapshot isolation is **not a sandbox**. Cargo
 outcomes do not provide per-path tracing, so inferred paths are not upgraded to
-Confirmed. Mixed-language combined execution remains unsupported.
+Confirmed. Mixed-language combined execution remains unsupported; verify such
+reviews one layer at a time.
 
 ### Node.js and TypeScript reviews
 

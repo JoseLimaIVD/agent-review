@@ -67,9 +67,16 @@ export function callableName(item) {
 
 const testName = (id) => String(id).split("::").at(-1);
 
-// Parametrized results (`test_x[case]`) belong to the statically linked `test_x`.
+// Parametrized results (`test_x[case]`, including nested brackets like `test_x[[1, 2]]`) belong to the statically linked `test_x`.
 export function baseTestId(id) {
-    return String(id).replace(/\[[^\]]*\]$/, "");
+    const text = String(id);
+    if (!text.endsWith("]")) return text;
+    let depth = 0;
+    for (let index = text.length - 1; index >= 0; index--) {
+        if (text[index] === "]") depth++;
+        else if (text[index] === "[" && --depth === 0) return text.slice(0, index);
+    }
+    return text;
 }
 
 export function sameTest(traceId, linkedId) {
@@ -95,7 +102,7 @@ export function pathEvidence(item, entry, run) {
     const evidence = entry.evidence || { level: "none", tests: [] };
     const coverage = evidence.coverage ? ` · coverage report: ${evidence.coverage}` : "";
     const key = `${item.id}:${entry.decision.line}`;
-    const current = run?.status === "complete" && !run.stale;
+    const current = (run?.status === "complete" || (run?.status === "running" && run.executed)) && !run.stale;
     const executed = current ? run.executed?.[key] : undefined;
     if (executed?.length) {
         const passing = executed.filter((test) => test.outcome === "passed");
@@ -137,6 +144,57 @@ export const EVIDENCE_GROUPS = {
     inferred: ["asserted", "exercised", "reachable", "possible"],
     untested: ["none", "not-executed"],
 };
+
+const testPath = (test) => test.path || String(test.id).split("::")[0];
+
+// The slice of a decision map that belongs to one reading layer: its files' callables and the linked tests that reach
+// them or are declared in its files. Every language adapter plans from this shape, so a layer can be verified alone.
+export function scopeDecisionMap(map, paths) {
+    if (!map || map.status !== "complete") return map;
+    const inScope = new Set(paths);
+    const callables = (map.callables || []).filter((item) => inScope.has(item.path));
+    const ids = new Set(callables.map((item) => String(item.id)));
+    const names = new Set(callables.map((item) => item.qualname));
+    const reaches = (test) => test.callable_ids ? test.callable_ids.some((id) => ids.has(String(id)))
+        : (test.callables || []).some((name) => names.has(name));
+    const tests = (map.verification?.tests || []).filter((test) => reaches(test) || inScope.has(testPath(test)));
+    // A multi-language map narrows to the languages this layer actually contains, so a one-language layer can run.
+    const adapters = map.adapter_ids ? [...new Set([...callables, ...tests].map((item) => item.adapter_id).filter(Boolean))] : null;
+    return { ...map, callables, verification: map.verification ? { ...map.verification, tests, omitted_tests: 0 } : map.verification,
+        ...(adapters ? adapters.length === 1 ? { adapter_ids: undefined, adapter_id: adapters[0] } : { adapter_ids: adapters.length ? adapters : map.adapter_ids } : {}) };
+}
+
+// What a run says about one layer: how many of its linked tests ran, and their worst outcomes.
+export function layerTestStatus(map, run, paths) {
+    if (!map || map.status !== "complete") return { state: map?.status === "loading" ? "loading" : "unavailable", linked: 0 };
+    const tests = (scopeDecisionMap(map, paths).verification?.tests || []).filter((test) => test.link !== "name-only");
+    if (!tests.length) return { state: "none", linked: 0 };
+    const counts = { passed: 0, failed: 0, error: 0, skipped: 0, not_run: 0 };
+    const complete = run?.status === "complete" || run?.tests?.length || run?.history?.length;
+    for (const test of tests) {
+        const outcome = complete ? linkedTestOutcome(run, test.id) : undefined;
+        counts[outcome && counts[outcome] !== undefined ? outcome : "not_run"]++;
+    }
+    const ran = tests.length - counts.not_run;
+    const outcome = !ran ? "not-run" : counts.failed || counts.error ? "failing" : counts.not_run ? "partial" : counts.skipped ? "skipped" : "passed";
+    const running = run?.status === "running" && (!run.scope || run.scope.paths?.some((path) => paths.includes(path)));
+    // While this layer is being run again, the results recorded before the run stay available as `outcome`.
+    return { state: running ? "running" : outcome, outcome, linked: tests.length, ran, counts, stale: Boolean(run?.stale && ran) };
+}
+
+// Combines a run with earlier results of the same snapshot, so verifying layer after layer accumulates evidence. Every
+// earlier result of a test the new run planned is replaced, even when runners name results differently per run.
+export function mergeTestRuns(previous, next, planned = []) {
+    const rerun = (test) => planned.some((id) => sameTest(test.id, id));
+    const tests = new Map((previous.tests || []).filter((test) => !rerun(test)).map((test) => [test.id, test]));
+    for (const test of next.tests || []) tests.set(test.id, test);
+    const list = [...tests.values()];
+    return { ...next, tests: list, executed: { ...(previous.executed || {}), ...(next.executed || {}) },
+        ran: { ...(previous.ran || {}), ...(next.ran || {}) },
+        ...(next.path_evidence_limitation || previous.path_evidence_limitation
+            ? { path_evidence_limitation: next.path_evidence_limitation || previous.path_evidence_limitation } : {}),
+        counts: Object.fromEntries(["passed", "failed", "error", "skipped"].map((outcome) => [outcome, list.filter((test) => test.outcome === outcome).length])) };
+}
 
 export function evidenceCounts(map, run) {
     const counts = { confirmed: 0, inferred: 0, untested: 0 };

@@ -220,8 +220,14 @@ export function startReviewServer(state, options = {}) {
                 sendJson(res, await state.testRunPlan());
                 return;
             }
+            if (req.method === "POST" && pathname === "/api/test-run/plan") {
+                const input = await readJson(req);
+                sendJson(res, await state.testRunPlan({ layer: input?.layer || null }));
+                return;
+            }
             if (req.method === "POST" && pathname === "/api/test-run") {
-                sendJson(res, { run: await state.runLinkedTests() }, 202);
+                const input = await readJson(req);
+                sendJson(res, { run: await state.runLinkedTests({ layer: input?.layer || null }) }, 202);
                 return;
             }
             if (req.method === "POST" && pathname === "/api/test-run/cancel") {
