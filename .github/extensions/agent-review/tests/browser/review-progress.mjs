@@ -60,7 +60,7 @@ try {
         await page.locator("#workflow-finish").click();
         await page.locator("#review-finish").getByText("Review has remaining work", { exact: true }).waitFor();
         assert.match(await page.locator("#review-finish").textContent(), /1 reviewed.*1 need follow-up|1 of 2 changed files reviewed/);
-        await page.getByRole("button", { name: "Continue remaining review", exact: true }).click();
+        await page.locator("#review-finish").getByRole("button", { name: /^Continue at / }).click();
         await page.waitForFunction(() => document.querySelector("#file-review-disposition")?.value === "follow-up");
         await page.locator("#file-review-disposition").selectOption("reviewed");
         await page.locator("#file-review-next").click();

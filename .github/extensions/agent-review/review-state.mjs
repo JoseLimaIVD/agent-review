@@ -369,13 +369,23 @@ export class ReviewState {
         return this.reviewProgressStore.update(input.snapshot, input.revision, input.entries, location);
     }
 
+    // The rail's layer order and AI layer lines, for summaries that should read in the same order as the review.
+    handoffLayers(model) {
+        try {
+            const navigation = workspaceNavigation(model, sectionsFor(model, this.reviewEvidenceModel === model ? this.reviewEvidence : null));
+            return navigation.layers.map((layer) => ({ number: layer.number, name: layer.name, supporting: Boolean(layer.supporting),
+                intent: this.annotations.layers?.intents?.[layer.id] || null, summary: layer.summary,
+                files: layer.groups.flatMap((group) => group.files.map((file) => file.path)) }));
+        } catch { return null; }
+    }
+
     async prepareHandoff() {
         const model = this.model;
         if (!model || this.loading) throw new Error("Wait for the saved review before preparing a handoff.");
         const target = this.reviewTarget;
         const progress = await this.progressForReview();
         if (this.model !== model || this.reviewTarget !== target) throw new Error("The review changed while preparing the handoff.");
-        const result = createReviewHandoff(model, target, progress, { testRun: this.testRun });
+        const result = createReviewHandoff(model, target, progress, { testRun: this.testRun, layers: this.handoffLayers(model) });
         const token = randomUUID();
         this.handoffPreview = { token, model, target, revision: progress.revision, snapshot: progress.snapshot,
             body: result.markdown, created: Date.now(), consumed: false };

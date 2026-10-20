@@ -30,13 +30,17 @@ try {
                 body: JSON.stringify({ error: "Navigation regression stops before model generation." }) })
             : route.continue());
         await page.goto(`${url}?scoutTheme=${theme}`);
-        const firstCard = page.locator("#attention .review-card").first();
+        // The priority queue lives under Explore; keyboard-opening its first row must move focus into source.
+        await page.locator(".workspace-explore summary").click();
+        await page.locator("#explore-priorities").click();
+        const firstCard = page.locator("#graph .review-plan-row").first();
+        await firstCard.waitFor();
         await firstCard.focus();
         await firstCard.press("Enter");
         await page.waitForFunction(() => document.querySelector("#source")?.getAttribute("aria-busy") !== "true"
             && document.querySelector("#source-panel")?.contains(document.activeElement));
         await page.locator("#source-close").click();
-        await page.locator("#review-command-open").click();
+        await page.locator("#workspace-find").click();
         const dialog = page.locator("#review-command-palette");
         await page.locator("#review-command-query").fill(path);
         await page.keyboard.press("ArrowDown");

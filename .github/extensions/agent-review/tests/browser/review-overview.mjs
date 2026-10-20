@@ -32,6 +32,7 @@ try {
                 await page.screenshot({ path: join(process.env.AGENT_REVIEW_SCREENSHOT_DIR, `overview-${theme}-${width}.png`) });
             }
             await start.focus();
+            await page.waitForFunction(() => !document.querySelector("#overview-start").disabled);
             await start.press("Enter");
             await page.locator("#source-panel").waitFor();
             await page.waitForFunction(() => document.querySelector("#source")?.getAttribute("aria-busy") !== "true"

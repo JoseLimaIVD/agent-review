@@ -6,6 +6,16 @@ const url = process.env.AGENT_REVIEW_UX_URL;
 if (!url) throw new Error("Set AGENT_REVIEW_UX_URL to the real large review.");
 const endpoint = new URL("/api/review-progress", url);
 const original = await fetch(endpoint).then((response) => response.json());
+// Layer order opens foundations first, which may be short; seed the reading point on a long changed file instead.
+const longFile = await (async () => {
+    const { model } = await fetch(new URL("/api/state", url)).then((response) => response.json());
+    for (const change of model.changes.filter((item) => item.status !== "unchanged" && item.status !== "deleted")) {
+        const source = await fetch(new URL(`/api/source?path=${encodeURIComponent(change.path)}`, url)).then((response) => response.json());
+        if (typeof source.current === "string" && source.current.split("\n").length >= 120) return change.path;
+    }
+    throw new Error("The large review needs a changed file with at least 120 lines.");
+})();
+const seed = { path: longFile, line: 1, side: "current", tab: "current", item_id: `file:${longFile}` };
 const { chromium } = createRequire(process.env.AGENT_REVIEW_BROWSER_PACKAGE || import.meta.url)("playwright-core");
 const browser = await chromium.launch({ headless: true, executablePath: process.env.AGENT_REVIEW_BROWSER_EXECUTABLE || [
     "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
@@ -25,10 +35,13 @@ const restore = async (cursor = original.cursor) => {
 };
 try {
     for (const theme of ["light", "dark"]) {
-        await restore(null);
+        await restore(seed);
         const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
         await page.goto(`${url}?scoutTheme=${theme}`);
+        await page.waitForFunction(() => !document.querySelector("#overview-start").disabled);
         await page.locator("#overview-start").click();
+        await page.waitForFunction((path) => document.querySelector("#source-title")?.textContent.startsWith(path)
+            && document.querySelector("#source")?.getAttribute("aria-busy") !== "true", longFile);
         await page.locator(".tab[data-tab='current']").click();
         const row = page.locator('#source .code-row[data-new-line="100"]');
         await row.waitFor({ state: "attached" });

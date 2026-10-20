@@ -57,7 +57,7 @@ const state = {
     fileReviewDrafts: new Map(),
 };
 const elements = Object.fromEntries([
-    "source-coverage",
+    "source-coverage", "overview-layers",
     "review-target-form", "review-mode", "review-ref", "review-target-label", "repository-identity", "review-list-refresh", "review-more", "review-options-status", "review-picker-notice", "clean-review", "change-brief",
     "review-overview", "review-background", "overview-title", "overview-description", "overview-progress", "overview-scope", "overview-start", "overview-files",
     "review-workflow", "workflow-overview", "workflow-review", "workflow-finish", "review-finish", "workspace-target", "workspace-find", "workspace-nav-toggle",
@@ -1490,12 +1490,33 @@ function renderFinishReview() {
         el("h2", "", progress.pending || progress.followUp ? "Review has remaining work" : "Changed files marked reviewed"),
         el("p", "", `${progress.reviewed} of ${countLabel(progress.total, "changed file")} reviewed · ${progress.pending} not reviewed · ${progress.followUp} need follow-up`),
         el("p", "muted", "Human review decisions do not prove correctness, resolve concerns, complete AI analysis or establish test coverage."));
-    const next = nextFileReview(fileReviewQueue(), state.reviewLedger);
+    const navigation = layeredNavigation();
+    const next = overviewDestination();
     if (next) {
-        const button = el("button", "review-next", "Continue remaining review");
+        const layer = layerOf(navigation, next);
+        const button = el("button", "review-next", `Continue at ${layer && navigation.layers.length > 1 ? `${layerLabel(layer)} › ` : ""}${next.path.split("/").at(-1)}${next.line ? `:${next.line}` : ""}`);
         button.type = "button";
-        button.addEventListener("click", () => nextFileFromRail().then(openFileReview).catch(showError));
+        button.title = `Opens ${next.path}`;
+        button.addEventListener("click", () => (next.resume ? resumeReviewCursor(next.resume) : openFileReview(next.entry)).catch(showError));
         panel.append(button);
+    }
+    if (navigation?.layers.length) {
+        const layers = el("ol", "overview-layers finish-layers");
+        layers.setAttribute("aria-label", "Progress by layer");
+        for (const layer of navigation.layers) {
+            const progress = layerProgress(layer);
+            const row = el("button", `overview-layer${layer.supporting ? " is-supporting" : ""}`);
+            row.type = "button";
+            const name = el("span", "overview-layer-name");
+            name.append(el("strong", "", layer.name));
+            row.append(el("span", "overview-layer-number", layer.number ? String(layer.number) : "·"), name,
+                el("span", "overview-layer-progress", `${progress.reviewed}/${progress.total} reviewed`));
+            row.addEventListener("click", () => openLayer(navigation, layer));
+            const item = el("li", "");
+            item.append(row);
+            layers.append(item);
+        }
+        panel.append(layers);
     }
     const legacy = [...state.reviewLedger].filter(([id]) => !id.startsWith("review-file:"));
     const triagedFollowUp = legacy.filter(([, entry]) => entry.disposition === "follow-up").length;
@@ -1508,13 +1529,19 @@ function renderFinishReview() {
         ? `Linked-test run completed: ${tests.counts?.passed || 0} passed, ${tests.counts?.failed || 0} failed. This is separate from human review.`
         : "No completed linked-test run is recorded for this view. Coverage and AI analysis retain their own evidence limits."));
     const list = el("div", "finish-files");
-    for (const file of uniqueReviewFiles()) {
+    const fileButton = (file, group) => {
         const record = state.reviewLedger.get(fileReviewId(file.path));
-        const button = el("button", "workspace-file", `${record?.disposition || "pending"} · ${file.path}${record?.note ? ` — ${record.note}` : ""}`);
+        const button = el("button", "workspace-file", `${reviewStateLabel(record?.disposition || "pending")} · ${file.path}${record?.note ? ` — ${record.note}` : ""}`);
         button.type = "button";
-        button.addEventListener("click", () => openFileReview(file).catch(showError));
-        list.append(button);
-    }
+        button.addEventListener("click", () => openFileReview(group ? { path: file.path, group: group.id, file } : file).catch(showError));
+        return button;
+    };
+    if (navigation) {
+        for (const layer of navigation.layers) {
+            list.append(el("h4", "finish-layer-heading", layerLabel(layer)));
+            for (const group of layer.groups) for (const file of group.files) list.append(fileButton(file, group));
+        }
+    } else for (const file of uniqueReviewFiles()) list.append(fileButton(file, null));
     const details = el("details", "");
     details.append(el("summary", "", "All file decisions"), list);
     panel.append(details);
@@ -1883,7 +1910,7 @@ function ensureSectionData() {
                 state.sectionData = data;
                 state.sectionDataKey = key;
                 state.sectionLoadingKey = null;
-                if (state.mode === "sections" || state.reviewPage === "review") render();
+                render();
             }, (error) => {
                 if (state.sectionLoadingKey !== key) return;
                 state.sectionError = { key, message: error.message };
@@ -2170,6 +2197,8 @@ function resetToWalkthrough() {
 
 function renderBreadcrumbs() {
     elements.breadcrumbs.replaceChildren();
+    // The plan/architecture trail belongs to Explore; the Overview has a single reading path.
+    elements.breadcrumbs.classList.toggle("hidden", state.reviewPage === "overview" || state.reviewPage === "finish");
     const plan = el("button", "", "Review plan");
     plan.type = "button";
     plan.addEventListener("click", resetToWalkthrough);
@@ -2265,6 +2294,86 @@ function overviewPlan() {
         [...groupFindings(model.attention || []), ...(state.payload.generated_observations || [])]) : [];
 }
 
+// One layered model shared by the rail, Overview and Finish so names and order always agree.
+function layeredNavigation() {
+    const model = state.payload?.model;
+    const data = model && !state.payload.loading ? ensureSectionData() : null;
+    if (!data) return null;
+    const key = `${state.payload.review_generation}:${state.sectionDataKey}`;
+    if (state.layeredNavigationKey !== key) {
+        state.layeredNavigation = workspaceNavigation(model, data);
+        state.layeredNavigationKey = key;
+    }
+    return state.layeredNavigation;
+}
+
+function layerOf(navigation, entry) {
+    const group = entry && navigation?.groups.find((item) => item.id === entry.group || item.files.some((file) => file.path === entry.path));
+    return group && navigation.layers.find((layer) => layer.id === group.layer);
+}
+
+const layerLabel = (layer) => layer ? `${layer.number ? `${layer.number}. ` : ""}${layer.name}` : "";
+
+function layerProgress(layer) {
+    const files = layer.groups.flatMap((group) => group.files);
+    return { reviewed: files.filter((file) => state.reviewLedger.get(fileReviewId(file.path))?.disposition === "reviewed").length, total: files.length };
+}
+
+function openLayer(navigation, layer) {
+    const ids = new Set(layer.groups.map((group) => group.id));
+    const entries = reviewSequence(navigation).filter((entry) => ids.has(entry.group));
+    openFileReview(nextFileReview(entries, state.reviewLedger) || entries[0]).catch(showError);
+}
+
+function renderOverviewLayers(navigation) {
+    const list = elements.overview_layers;
+    list.replaceChildren();
+    if (!navigation) {
+        list.append(el("li", "overview-layer-detail muted", state.sectionError ? "Grouping is unavailable; every changed file is still reachable from Review."
+            : "Ordering the change into layers…"));
+        return;
+    }
+    const plan = overviewPlan();
+    for (const layer of navigation.layers) {
+        const paths = new Set(layer.groups.flatMap((group) => group.files.map((file) => file.path)));
+        const progress = layerProgress(layer);
+        const row = el("button", `overview-layer${layer.supporting ? " is-supporting" : ""}`);
+        row.type = "button";
+        const name = el("span", "overview-layer-name");
+        name.append(el("strong", "", layer.name));
+        if (layer.path && layer.path !== "/" && !layer.supporting) name.append(el("code", "muted", layer.path));
+        row.append(el("span", "overview-layer-number", layer.number ? String(layer.number) : "·"), name,
+            el("span", "overview-layer-progress", `${progress.reviewed}/${progress.total} reviewed`));
+        const intent = state.payload.annotations?.layers?.intents?.[layer.id];
+        const details = [];
+        const top = plan.filter((item) => item.path && paths.has(item.path)).sort((a, b) => b.score - a.score)[0];
+        if (layer.dependsOn.length) details.push(`builds on ${layer.dependsOn.map(layerLabel).join(", ")}`);
+        if (top) details.push(`top priority: ${top.title}${top.kind === "package" && top.reasons?.[0] ? ` (${top.reasons[0]})` : ""}`);
+        const detail = el("span", "overview-layer-detail");
+        if (intent) detail.append(el("span", "workspace-layer-ai", "AI"), document.createTextNode(intent));
+        else if (layer.summary) detail.append(document.createTextNode(layer.summary));
+        if (details.length) detail.append(document.createTextNode(`${intent || layer.summary ? " · " : ""}${details.join(" · ")}`));
+        row.append(detail);
+        row.setAttribute("aria-label", `${layerLabel(layer)}: ${progress.reviewed} of ${progress.total} files reviewed. ${intent || layer.summary || ""}`);
+        row.addEventListener("click", () => openLayer(navigation, layer));
+        const item = el("li", "");
+        item.append(row);
+        list.append(item);
+    }
+}
+
+// Exactly where Start/Continue goes: the saved reading point if its file is still unreviewed, else the next rail file.
+function overviewDestination() {
+    const saved = state.savedReviewCursor;
+    const model = state.payload?.model;
+    const changed = saved && model?.changes.some((file) => file.path === saved.path && file.status !== "unchanged");
+    if (changed && (state.reviewLedger.get(fileReviewId(saved.path))?.disposition || "pending") === "pending") {
+        return { path: saved.path, line: saved.line > 1 ? saved.line : null, group: saved.group, resume: saved };
+    }
+    const next = nextFileReview(fileReviewQueue(), state.reviewLedger);
+    return next ? { path: next.path, group: next.group, entry: next } : null;
+}
+
 function renderReviewOverview() {
     const payload = state.payload;
     const model = payload?.model;
@@ -2300,6 +2409,16 @@ function renderReviewOverview() {
         ? state.savedReviewCursor || [...state.reviewLedger.values()].some((entry) => entry.disposition !== "pending") ? "Continue review" : "Start review"
         : "Review summary";
     elements.overview_start.title = next ? `Next changed file: ${next.path}` : "Review saved decisions and remaining concerns";
+    const navigation = layeredNavigation();
+    renderOverviewLayers(navigation);
+    if (navigation) ensureLayerSummaries();
+    const destination = overviewDestination();
+    if (destination && navigation) {
+        const layer = layerOf(navigation, destination);
+        const verb = elements.overview_start.textContent === "Continue review" ? "Continue" : "Start review";
+        elements.overview_start.textContent = `${verb} · ${layer && navigation.layers.length > 1 ? `${layerLabel(layer)} › ` : ""}${destination.path.split("/").at(-1)}${destination.line ? `:${destination.line}` : ""}`;
+        elements.overview_start.title = `Opens ${destination.path}${destination.line ? ` at line ${destination.line}` : ""}`;
+    }
     const disabled = Boolean(payload.loading || payload.cancelled || state.connectionLost || state.progressLoading);
     elements.overview_start.disabled = disabled;
     elements.overview_files.disabled = disabled;
@@ -2330,12 +2449,13 @@ function browseReviewFiles() {
     elements.graph.focus({ preventScroll: true });
 }
 
-elements.overview_start.addEventListener("click", () => {
-    const saved = state.savedReviewCursor;
-    const changed = saved && state.payload.model.changes.some((file) => file.path === saved.path && file.status !== "unchanged");
-    if (changed && (state.reviewLedger.get(fileReviewId(saved.path))?.disposition || "pending") === "pending") {
-        resumeReviewCursor(saved).catch(showError);
-    } else nextFileFromRail().then(openFileReview).catch(showError);
+elements.overview_start.addEventListener("click", async () => {
+    try {
+        await readySectionData();
+        const destination = overviewDestination();
+        if (destination?.resume) await resumeReviewCursor(destination.resume);
+        else await openFileReview(destination?.entry || null);
+    } catch (error) { showError(error); }
 });
 elements.overview_files.addEventListener("click", browseReviewFiles);
 
@@ -2813,6 +2933,15 @@ async function selectFile(change, annotate = true) {
     }
 }
 
+// True while the user has not moved on from the control that opened an async load, even if a re-render replaced that control.
+function focusStillAtOpener(opener) {
+    const active = document.activeElement;
+    if (active === opener || !active || active === document.body) return true;
+    if (opener?.isConnected !== false) return false;
+    return active.tagName === opener.tagName && active.className === opener.className
+        && (opener.dataset.reviewId ? active.dataset.reviewId === opener.dataset.reviewId : active.textContent === opener.textContent);
+}
+
 async function selectItem(item, notify = true, annotate = true) {
     const sourceOpener = document.activeElement;
     const keepSourceFocus = elements.source_panel.contains(sourceOpener);
@@ -2841,7 +2970,7 @@ async function selectItem(item, notify = true, annotate = true) {
         elements.source_panel.classList.add("hidden");
     }
     if (epoch !== state.selectionEpoch) return;
-    if (keepSourceFocus || document.activeElement === sourceOpener) {
+    if (keepSourceFocus || focusStillAtOpener(sourceOpener)) {
         const target = elements.source_panel.classList.contains("hidden") ? state.sourceReturnFocus : elements.source;
         target?.focus({ preventScroll: true });
     }
@@ -5264,7 +5393,29 @@ async function runCustomAnalyses(input = {}) {
     }
 }
 
+// Async data (sections, AI layer intents, progress) re-renders lists; keep keyboard focus on the same item instead of dropping it to <body>.
+function captureListFocus() {
+    const active = document.activeElement;
+    const container = active && active !== document.body
+        && active.closest("#graph, #review-finish, #overview-layers, #review-navigation");
+    if (!container) return () => {};
+    const selector = active.dataset.reviewId ? `[data-review-id="${CSS.escape(active.dataset.reviewId)}"]` : null;
+    const { tagName, className } = active;
+    const text = active.textContent;
+    return () => {
+        if (active.isConnected || (document.activeElement && document.activeElement !== document.body)) return;
+        const match = (selector && container.querySelector(selector))
+            || [...container.querySelectorAll(tagName)].find((item) => item.className === className && item.textContent === text);
+        match?.focus({ preventScroll: true });
+    };
+}
+
 function render() {
+    const restoreFocus = captureListFocus();
+    try { renderView(); } finally { restoreFocus(); }
+}
+
+function renderView() {
     const targetMode = state.payload?.review_target?.mode || "none";
     elements.review_target_label.textContent = state.payload?.review_target?.label || "Choose review target";
     const targetKey = JSON.stringify(state.payload?.review_target || {});
@@ -5737,13 +5888,14 @@ elements.source_close.addEventListener("click", () => {
         state.sourceReturnFocus.scrollIntoView({ block: "nearest" });
         state.sourceReturnFocus.focus({ preventScroll: true });
     } else {
+        const visible = (element) => element?.getClientRects().length ? element : null;
         const card = [...document.querySelectorAll(".review-card[data-item-id]")]
-            .find((card) => card.dataset.itemId === (state.sourceOriginItemId || state.selected?.id));
+            .find((card) => card.dataset.itemId === (state.sourceOriginItemId || state.selected?.id) && visible(card));
         const section = [...elements.graph.querySelectorAll(".section-card")]
             .find((section) => section.dataset.sectionId === state.selected?.id)?.querySelector("summary");
         const graphNode = [...elements.graph.querySelectorAll(".node")]
             .find((node) => node.dataset.nodeId === (state.selected?.node_id || state.selected?.id));
-        const target = section || graphNode || card || elements.review_command_open;
+        const target = visible(section) || visible(graphNode) || card || visible(elements.review_command_open) || elements.workspace_find;
         target.scrollIntoView({ block: "nearest" });
         target.focus({ preventScroll: true });
     }

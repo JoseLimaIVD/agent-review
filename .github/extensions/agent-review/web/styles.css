@@ -1707,6 +1707,21 @@ h3 { font-size: 14px; font-weight: 600; }
 .overview-copy-label { margin: 6px 0 4px; font-size: 12px; }
 .overview-progress { margin: 12px 0 4px; font-weight: 600; font-size: 13px; }
 #overview-scope { margin: 0; font-size: 12px; }
+.overview-path { margin: 12px 0 4px; }
+.overview-path-title { margin: 0 0 6px; font-size: 12px; font-weight: 600; color: var(--cp-text-muted); }
+.overview-layers { list-style: none; margin: 0; padding: 0; border: 1px solid var(--cp-border); border-radius: 6px; }
+.overview-layers > li + li { border-top: 1px solid var(--cp-border); }
+.overview-layer { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 2px 10px; align-items: baseline; width: 100%; padding: 8px 12px; border: 0; background: transparent; color: var(--cp-text); text-align: left; font: inherit; cursor: pointer; }
+.overview-layer:hover { background: var(--cp-surface-soft); }
+.overview-layer:focus-visible { outline: 2px solid var(--cp-link); outline-offset: -2px; }
+.overview-layer-number { display: inline-grid; place-items: center; width: 20px; height: 20px; border: 1px solid var(--cp-border-strong); border-radius: 50%; color: var(--cp-text-muted); font-size: 11px; font-weight: 600; }
+.overview-layer-name { font-size: 13px; overflow-wrap: break-word; }
+.overview-layer-name strong { margin-right: 6px; }
+.overview-layer-progress { color: var(--cp-text-muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.overview-layer-detail { grid-column: 2 / -1; color: var(--cp-text-muted); font-size: 12px; overflow-wrap: break-word; }
+.overview-layer.is-supporting .overview-layer-name { color: var(--cp-text-muted); }
+.finish-layers { margin: 12px 0; }
+.finish-layer-heading { margin: 10px 0 2px; font-size: 12px; color: var(--cp-text-muted); }
 .review-background { margin-bottom: 12px; border: 1px solid var(--cp-border); border-radius: 6px; background: var(--cp-surface); }
 .review-background > summary { padding: 10px 12px; cursor: pointer; font-size: 13px; color: var(--cp-text-muted); }
 .review-background[open] > summary { border-bottom: 1px solid var(--cp-border); }

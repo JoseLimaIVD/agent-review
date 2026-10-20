@@ -53,6 +53,20 @@ test("handoff lists every remaining file and the open concerns grouped the same 
     assert.match(markdown, /- 2 saved review concerns, not confirmed defects/);
 });
 
+test("handoff reads by layer and collapses identical concerns into one line naming their subjects", () => {
+    const model = { ...modelFor(), changes: ["src/a.js", "src/b.js", "README.md"].map((path) => ({ path, status: "modified" })),
+        attention: ["left-pad", "lodash", "picocolors"].map((name, index) => ({ id: `p${index}`, type: "package",
+            title: "Package dependency added", package_id: `package:npm:${name}`, impact_score: 74 })) };
+    const layers = [{ number: 1, name: "Utilities", intent: "Trims formatted values", files: ["src/a.js", "src/b.js"] },
+        { number: null, name: "Supporting files", summary: "1 file without a source relationship to the layers above", files: ["README.md"] }];
+    const { markdown } = createReviewHandoff(model, target, { entries: { "review-file:src/a.js": { disposition: "reviewed", path: "src/a.js" } }, cursor: null }, { layers });
+    assert.match(markdown, /## Review by layer\n\n### 1\. Utilities — 1\/2 reviewed\nAI summary \(verify in code\): Trims formatted values\n- Not reviewed · ` src\/b\.js `/);
+    assert.match(markdown, /### Supporting files — 0\/1 reviewed/);
+    assert.doesNotMatch(markdown, /## Remaining files/);
+    assert.match(markdown, /- Package dependency added ×3: ` left-pad `, ` lodash `, ` picocolors ` · static impact 74\/100/);
+    assert.equal(markdown.match(/Package dependency added/g).length, 1);
+});
+
 test("portable identity ignores local clone paths but never accepts different saved content or unavailable binary worktrees", () => {
     const one = modelFor(), two = modelFor("D:\\another\\clone");
     assert.equal(handoffIdentity(one, target), handoffIdentity(two, target));
