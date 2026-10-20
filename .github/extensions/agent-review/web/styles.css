@@ -1730,7 +1730,8 @@ h3 { font-size: 14px; font-weight: 600; }
 .overview-layer-number { display: inline-grid; place-items: center; width: 20px; height: 20px; border: 1px solid var(--cp-border-strong); border-radius: 50%; color: var(--cp-text-muted); font-size: 11px; font-weight: 600; }
 .overview-layer-name, .layer-title { font-size: 13px; overflow-wrap: break-word; }
 .overview-layer-name strong, .layer-title strong { margin-right: 6px; }
-.layer-title .workspace-layer-ai { margin-right: 6px; }
+.layer-title .workspace-layer-ai, strong > .workspace-layer-ai, .title-tail > .workspace-layer-ai { margin-left: 2px; font-weight: 400; vertical-align: 1px; }
+.title-tail { white-space: nowrap; }
 .layer-area { margin-right: 6px; font-size: 12px; }
 .layer-independent { display: inline-block; padding: 0 6px; border: 1px solid var(--cp-border); border-radius: 10px; color: var(--cp-text-muted); font-size: 11px; line-height: 16px; }
 .overview-layer-progress { color: var(--cp-text-muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -1766,6 +1767,9 @@ h3 { font-size: 14px; font-weight: 600; }
 .brief-ai-section h2 { margin-top: 0; }
 @media (max-width: 1000px) { .change-brief .brief-ai { grid-template-columns: minmax(0, 1fr); gap: 12px; } }
 .queue-item { position: relative; border-bottom: 1px solid var(--cp-border); }
+.review-card .card-heading > .layer-chip { display: grid; place-items: center; flex: 0 0 auto; margin: 0; padding: 0; line-height: 1; }
+.card-heading > .layer-chip + strong { flex: 1 1 140px; min-width: 0; text-align: left; }
+#attention > .review-plan-layer { margin: 12px 0 4px; padding: 0 12px; }
 .rail .queue-item .review-card { width: 100%; border-bottom: 0; padding-bottom: 28px; }
 .queue-toggle { position: absolute; right: 8px; bottom: 6px; padding: 0; border: 0; background: transparent; color: var(--cp-link); font: inherit; font-size: 12px; cursor: pointer; }
 .queue-toggle:hover { text-decoration: underline; }
@@ -1784,7 +1788,7 @@ html { scrollbar-gutter: stable; }
 .top-actions > #review-command-open { grid-column: 4; grid-row: 1; }
 .top-actions > #refresh { grid-column: 5; grid-row: 1; width: 100%; }
 @media (max-width: 600px) {
-  .topbar { grid-template-columns: minmax(0, 1fr) 130px; }
+  .topbar { grid-template-columns: minmax(0, 1fr) minmax(130px, auto); }
   .topbar > div:first-child { grid-column: 1; }
   .top-actions > #change-repository { grid-column: 1; grid-row: 2; justify-self: start; }
   .top-actions > #refresh { grid-column: 2; grid-row: 2; }
@@ -2045,7 +2049,7 @@ html { scrollbar-gutter: stable; }
 .review-workflow button[aria-current="page"], .workspace-nav-tabs button[aria-pressed="true"], .workspace-reading-tools button[aria-pressed="true"] { color: var(--cp-link); border-color: var(--cp-link); background: var(--cp-surface-soft); }
 .workspace-target { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--cp-text-muted); }
 /* Shown only where the header (and its freshness chip) is hidden. */
-body:not(.reviewing):not(.finishing-review) #workspace-freshness { display: none; }
+body:not(.reviewing):not(.finishing-review) #workspace-freshness, body:not(.reviewing):not(.finishing-review) #worktree-overview { display: none; }
 #workspace-freshness { flex: 0 0 auto; }
 .workspace-layer.is-revealed > summary { outline: 2px solid var(--cp-link); outline-offset: -2px; border-radius: 6px; background: var(--cp-accent-soft); }
 .workspace-explore { position: relative; }

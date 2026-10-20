@@ -71,7 +71,7 @@ const elements = Object.fromEntries([
     "review-handoff", "handoff-close", "handoff-status", "handoff-error", "handoff-refresh", "handoff-markdown",
     "handoff-markdown-save", "handoff-state-save", "handoff-state-preview", "handoff-import-file", "handoff-import-preview",
     "handoff-import-confirm", "handoff-import-error", "handoff-provider", "handoff-provider-status", "handoff-provider-error", "handoff-confirm", "handoff-submit",
-    "status", "refresh", "cancel-analysis", "analysis-cancelled", "source-context-notice", "connection-notice", "reconnect", "worktree-notice", "worktree-notice-text", "error", "analysis-progress", "progress-phase", "progress-message", "progress-percent",
+    "status", "refresh", "cancel-analysis", "analysis-cancelled", "source-context-notice", "connection-notice", "reconnect", "worktree-notice", "worktree-notice-text", "worktree-overview", "error", "analysis-progress", "progress-phase", "progress-message", "progress-percent",
     "progress-bar", "summary", "breadcrumbs", "attention", "attention-count", "packages", "rail-resize", "impact-view", "source-impact",
     "show-evidence", "show-discussion", "item-discussion", "sections-view", "source-section",
     "source-focus", "source-location", "review-command-open", "review-command-palette", "review-command-close", "review-command-query", "review-command-count", "review-command-results",
@@ -382,12 +382,8 @@ function renderWorkspaceNavigation() {
             const heading = el("summary", "workspace-layer-heading");
             const name = el("span", "workspace-layer-name");
             const title = layerTitle(layer);
-            name.append(el("span", "workspace-layer-number", layer.number ? String(layer.number) : "·"), el("strong", "", title));
-            if (title !== layer.name) {
-                const badge = el("span", "workspace-layer-ai", "AI");
-                badge.title = "AI-written step title; the area name is shown below";
-                name.append(badge);
-            }
+            name.append(el("span", "workspace-layer-number", layer.number ? String(layer.number) : "·"),
+                titleWithBadge(title, title !== layer.name, "AI-written step title; the area name is shown below"));
             const meta = el("span", "workspace-layer-meta");
             if (title !== layer.name) meta.append(el("span", "", layer.name));
             if (layer.path && layer.path !== "/" && !layer.supporting) meta.append(el("code", "", layer.path));
@@ -2461,17 +2457,17 @@ function layeredNavigation() {
 
 function layerOf(navigation, entry) {
     if (!navigation || !entry) return null;
-    if (entry.group) {
-        const group = navigation.groups.find((item) => item.id === entry.group);
-        if (group) return navigation.layers.find((layer) => layer.id === group.layer);
-    }
     if (!navigation.layerByPath) {
         navigation.layerByPath = new Map();
         for (const layer of navigation.layers) for (const group of layer.groups) for (const file of group.files) {
             if (!navigation.layerByPath.has(file.path)) navigation.layerByPath.set(file.path, layer);
         }
     }
-    return navigation.layerByPath.get(entry.path) || null;
+    // Each changed file lives in exactly one layer, so its path is authoritative; a saved group may predate the current layering.
+    const byPath = entry.path && navigation.layerByPath.get(entry.path);
+    if (byPath) return byPath;
+    const group = entry.group && navigation.groups.find((item) => item.id === entry.group);
+    return group ? navigation.layers.find((layer) => layer.id === group.layer) || null : null;
 }
 
 // AI step titles name what the reader does in a layer; the deterministic area name stays as the subtitle and fallback.
@@ -2483,15 +2479,23 @@ function dependencyLabel(navigation, dependency) {
     return layer ? layerLabel(layer) : `${dependency.number}. ${dependency.name}`;
 }
 
+// The AI badge stays attached to the title's last word, so wrapping never makes the area name look AI-written.
+function titleWithBadge(title, isAi, hint) {
+    const strong = el("strong", "");
+    if (!isAi) { strong.textContent = title; return strong; }
+    const words = title.split(" ");
+    const tail = el("span", "title-tail", words.pop());
+    const badge = el("span", "workspace-layer-ai", "AI");
+    badge.title = hint;
+    tail.append(" ", badge);
+    strong.append(words.length ? `${words.join(" ")} ` : "", tail);
+    return strong;
+}
+
 function layerHeading(layer, { path = true } = {}) {
     const name = el("span", "layer-title");
     const title = layerTitle(layer);
-    name.append(el("strong", "", title));
-    if (title !== layer.name) {
-        const badge = el("span", "workspace-layer-ai", "AI");
-        badge.title = "AI-written step title; the area name is shown beside it";
-        name.append(badge);
-    }
+    name.append(titleWithBadge(title, title !== layer.name, "AI-written step title; the area name is shown beside it"));
     const area = [title !== layer.name ? layer.name : null, path && layer.path && layer.path !== "/" && !layer.supporting ? layer.path : null].filter(Boolean);
     if (area.length) name.append(el("span", "layer-area muted", area.join(" · ")));
     if (layer.number && layer.number > 1 && !layer.dependsOn.length) {
@@ -5875,7 +5879,7 @@ function renderView() {
         elements.graph_title.textContent = "Evidence-backed impact";
         renderImpact(model);
     } else if (state.mode === "walkthrough") {
-        elements.level_label.textContent = "REVIEW PLAN";
+        elements.level_label.textContent = "EXPLORE";
         elements.graph_title.textContent = "Attention";
         renderReviewPlan(model, groupedObservations);
     } else if (state.mode === "graph") {
@@ -5972,6 +5976,11 @@ elements.status.addEventListener("click", () => {
 elements.workspace_freshness.addEventListener("click", () => {
     state.freshnessOpen = !state.freshnessOpen;
     render();
+});
+// Reanalyze lives once, in the Overview header; from Review the notice leads there instead of duplicating it.
+elements.worktree_overview.addEventListener("click", () => {
+    elements.workflow_overview.click();
+    elements.refresh.focus({ preventScroll: true });
 });
 elements.cancel_analysis.addEventListener("click", async () => {
     state.cancelling = true;
