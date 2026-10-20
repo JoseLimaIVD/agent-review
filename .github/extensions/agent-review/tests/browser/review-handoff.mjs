@@ -71,15 +71,22 @@ try {
         assert.equal(await page.locator("#handoff-import-confirm").isDisabled(), true);
         const before = await fetch(endpoint).then((response) => response.json());
         await choose(artifact);
+        await page.locator("#handoff-import-preview").getByText(/nothing would change/).waitFor();
+        assert.equal(await page.locator("#handoff-import-confirm").isDisabled(), true, "re-importing identical decisions offers nothing to confirm");
+        const other = artifact.scope.find((file) => !Object.hasOwn(artifact.entries, `review-file:${file.path}`));
+        const addition = structuredClone(artifact);
+        addition.entries[`review-file:${other.path}`] = { disposition: "reviewed", note: "", path: other.path, line: 1, updated_at: new Date().toISOString() };
+        await choose(addition);
+        await page.locator("#handoff-import-preview").getByText(/1 decision would change/).waitFor();
         await page.waitForFunction(() => !document.querySelector("#handoff-import-confirm").disabled);
         assert.equal((await fetch(endpoint).then((response) => response.json())).revision, before.revision, "preview does not import");
         await page.locator("#handoff-import-confirm").click();
-        await page.locator("#handoff-import-preview").getByText(/Decisions imported and saved/).waitFor();
+        await page.locator("#handoff-import-preview").getByText(/1 decision imported and saved/).waitFor();
         const conflict = structuredClone(artifact);
         Object.values(conflict.entries)[0].note = "Conflicting note";
         await choose(conflict);
         await page.locator("#handoff-import-error").getByText(/conflicts with an existing decision/).waitFor();
-        assert.doesNotMatch(await page.locator("#handoff-import-preview").textContent(), /Exact saved source matches|Decisions imported and saved/);
+        assert.doesNotMatch(await page.locator("#handoff-import-preview").textContent(), /Exact saved source matches|imported and saved/);
         assert.ok(await page.locator("#handoff-import-error").evaluate((error) => {
             const box = error.getBoundingClientRect(), dialog = document.querySelector("#review-handoff").getBoundingClientRect();
             return box.top >= dialog.top && box.bottom <= dialog.bottom;

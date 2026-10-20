@@ -47,10 +47,27 @@ test("handoff lists every remaining file and the open concerns grouped the same 
     const { markdown } = createReviewHandoff(model, target, { entries: {}, cursor: null });
     assert.match(markdown, /<details><summary>20 files not yet reviewed<\/summary>/);
     for (const path of paths) assert.ok(markdown.includes(path), `${path} is listed`);
-    assert.match(markdown, /## Open review priorities\n2 saved concerns/);
+    assert.match(markdown, /## Open review priorities\n2 open concerns, highest static priority first/);
     assert.match(markdown, /Broad caller impact · `` src\/file-03\.js:12 ``|Broad caller impact · ` src\/file-03\.js:12 `/);
-    assert.match(markdown, /static impact 100\/100/);
-    assert.match(markdown, /- 2 saved review concerns, not confirmed defects/);
+    assert.match(markdown, /static priority 100\/100/);
+    assert.match(markdown, /- 2 saved review concerns \(2 open\), not confirmed defects/);
+});
+
+test("handoff priorities use the shared static priority and leave set-aside triage out of open priorities", () => {
+    const model = { ...modelFor(), changes: [{ path: "src/a.js", status: "modified" }],
+        nodes: [{ id: "n1", name: "parse", path: "src/a.js", start_line: 3 }, { id: "n2", name: "emit", path: "src/a.js", start_line: 9 }],
+        attention: [
+            { id: "a1", node_id: "n1", type: "callers", title: "Broad caller impact", impact_score: 84 },
+            { id: "a2", node_id: "n2", type: "complexity", title: "Complexity increased", impact_score: 70 },
+        ] };
+    const priority = (concern) => ({ a1: 100, a2: 71 })[concern.id];
+    const entries = { "review:n2": { disposition: "accepted", note: "Intentional", path: "src/a.js" } };
+    const { markdown } = createReviewHandoff(model, target, { entries, cursor: null }, { priority });
+    assert.match(markdown, /1 open concern, highest static priority first; 1 set aside by triage/);
+    assert.match(markdown, /Broad caller impact · ` src\/a\.js:3 ` · static priority 100\/100/, "the shared priority, not the raw impact score");
+    assert.doesNotMatch(markdown, /Complexity increased/, "an accepted risk is not an open priority");
+    assert.match(markdown, /## Concern triage\n.*\n- emit in ` src\/a\.js `: Accepted risk — Intentional/);
+    assert.match(markdown, /JSON contains only file decisions|No source bodies, per-item AI explanations|Neither includes source bodies, per-item AI explanations/);
 });
 
 test("handoff reads by layer and collapses identical concerns into one line naming their subjects", () => {
@@ -63,7 +80,8 @@ test("handoff reads by layer and collapses identical concerns into one line nami
     assert.match(markdown, /## Review by layer\n\n### 1\. Utilities — 1\/2 reviewed\nAI summary \(verify in code\): Trims formatted values\n- Not reviewed · ` src\/b\.js `/);
     assert.match(markdown, /### Supporting files — 0\/1 reviewed/);
     assert.doesNotMatch(markdown, /## Remaining files/);
-    assert.match(markdown, /- Package dependency added ×3: ` left-pad `, ` lodash `, ` picocolors ` · static impact 74\/100/);
+    assert.match(markdown, /- Package dependency added ×3: ` left-pad `, ` lodash `, ` picocolors ` · static priority 74\/100/);
+    assert.match(markdown, /AI-written layer titles and one-line layer summaries \(each marked\)/, "the sharing disclosure names the AI text it includes");
     assert.equal(markdown.match(/Package dependency added/g).length, 1);
 });
 
@@ -91,10 +109,15 @@ test("imports preview without mutation, retain current position, reject conflict
     const artifact = createReviewHandoff(state.model, target, progress).artifact;
     const preview = await state.importHandoff({ artifact, revision: 0 });
     assert.equal(preview.records, 1);
+    assert.equal(preview.changes, 1);
     assert.equal((await state.progressForReview()).revision, 0);
     const saved = await state.importHandoff({ artifact, revision: 0, confirm: true });
     assert.equal(saved.entries["review-file:a.js"].note, entry.note);
+    assert.equal(saved.changes, 1);
     assert.equal(saved.cursor.line, 2);
+    const again = await state.importHandoff({ artifact, revision: 1, confirm: true });
+    assert.equal(again.unchanged, true, "re-importing identical decisions changes nothing");
+    assert.equal((await state.progressForReview()).revision, 1, "an unchanged import does not bump the saved revision");
     const conflict = structuredClone(artifact);
     conflict.entries["review-file:a.js"].note = "Different note";
     await assert.rejects(state.importHandoff({ artifact: conflict, revision: 1 }), /conflicts with an existing decision for a\.js;/);

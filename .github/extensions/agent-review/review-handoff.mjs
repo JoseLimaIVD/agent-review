@@ -1,8 +1,9 @@
 import { execFile } from "node:child_process";
 import { basename } from "node:path";
 import { reviewIdentity } from "./review-pipeline.mjs";
-import { fileReviewId, fileReviewProgress, parseReviewLedger } from "./web/review-ledger.mjs";
+import { REVIEW_DISPOSITIONS, fileReviewId, fileReviewProgress, isConcernSetAside, parseReviewLedger } from "./web/review-ledger.mjs";
 import { groupFindings } from "./web/findings.mjs";
+import { countLabel } from "./web/count-format.mjs";
 
 const text = (value) => String(value ?? "").replace(/[\\`*_{}[\]()#+!|<>]/g, "\\$&").replace(/\r?\n/g, " ");
 const code = (value) => {
@@ -20,7 +21,7 @@ export function handoffIdentity(model, target) {
         mode: target.mode }, source_files }, `review-handoff-v1:${JSON.stringify(changes)}`, null);
 }
 
-export function createReviewHandoff(model, target, progress, { testRun, warnings = model.warnings || [], layers = null } = {}) {
+export function createReviewHandoff(model, target, progress, { testRun, warnings = model.warnings || [], layers = null, priority = null } = {}) {
     const entries = new Map(Object.entries(progress.entries));
     const counts = fileReviewProgress(model, entries);
     const files = (model.changes || []).filter((file) => file.status !== "unchanged");
@@ -79,14 +80,18 @@ export function createReviewHandoff(model, target, progress, { testRun, warnings
             if (remaining.length) lines.push(...pendingList(remaining));
         }
     } else if (pending.length) lines.push("", "## Remaining files", ...pendingList(pending.map((file) => file.path)));
-    const concerns = groupFindings(model.attention || []);
+    const allConcerns = groupFindings(model.attention || []);
+    // Accepted risks and false positives are listed under Concern triage, not as open priorities.
+    const concerns = allConcerns.filter((concern) => !isConcernSetAside(concern, entries));
+    const setAside = allConcerns.length - concerns.length;
+    const scoreOf = (concern) => (priority ? priority(concern) : concern.impact_score) ?? -1;
     if (concerns.length) {
         lines.push("", "## Open review priorities",
-            `${concerns.length} saved concerns, highest static impact first. These are review signals, not confirmed defects; concern triage is listed separately below.`);
+            `${countLabel(concerns.length, "open concern")}, highest static priority first${setAside ? `; ${setAside} set aside by triage` : ""}. These are review signals, not confirmed defects; concern triage is listed separately below.`);
         const nodesById = new Map((model.nodes || []).map((node) => [node.id, node]));
         // Identical concern titles (e.g. many added packages) collapse to one line naming their subjects.
         const byTitle = new Map();
-        for (const concern of concerns) {
+        for (const concern of [...concerns].sort((a, b) => scoreOf(b) - scoreOf(a))) {
             const key = concern.title || concern.type;
             byTitle.set(key, [...byTitle.get(key) || [], concern]);
         }
@@ -99,8 +104,8 @@ export function createReviewHandoff(model, target, progress, { testRun, warnings
         for (const [title, items] of byTitle) {
             if (shown >= 15) break;
             shown++;
-            const score = Math.max(...items.map((item) => item.impact_score ?? -1));
-            const scoreText = score >= 0 ? ` · static impact ${score}/100` : "";
+            const score = Math.max(...items.map(scoreOf));
+            const scoreText = score >= 0 ? ` · static priority ${score}/100` : "";
             if (items.length === 1) {
                 const where = subject(items[0]);
                 lines.push(`- ${text(title)}${where ? ` · ${code(where)}` : ""}${scoreText}`);
@@ -111,17 +116,18 @@ export function createReviewHandoff(model, target, progress, { testRun, warnings
         }
         if (byTitle.size > 15) lines.push(`- ${byTitle.size - 15} further concern types are listed in Agent Review.`);
     }
-    const narrower = [...entries].filter(([id]) => !id.startsWith("review-file:"));
+    const narrower = [...entries].filter(([id, entry]) => !id.startsWith("review-file:") && entry.disposition !== "pending");
     if (narrower.length) {
         lines.push("", "## Concern triage", "Triage explains why a concern was set aside; it does not mark files reviewed.");
         const nodesById = new Map((model.nodes || []).map((node) => [node.id, node]));
+        const labels = Object.fromEntries(REVIEW_DISPOSITIONS);
         const triageLabel = (id, entry) => {
             const node = nodesById.get(id.replace(/^(?:review|section):/, ""));
-            const name = node?.display_name || node?.name;
+            const name = node?.display_name || node?.name || (id.includes("package:") ? id.replace(/^review:package:[^:]+:/, "") : null);
             const where = entry.path || node?.path;
             return name ? `${text(name)}${where ? ` in ${code(where)}` : ""}` : code(id);
         };
-        for (const [id, entry] of narrower.slice(0, 20)) lines.push(`- ${triageLabel(id, entry)}: ${text(entry.disposition)}${entry.note ? ` — ${text(entry.note)}` : ""}`);
+        for (const [id, entry] of narrower.slice(0, 20)) lines.push(`- ${triageLabel(id, entry)}: ${text(labels[entry.disposition] || entry.disposition)}${entry.note ? ` — ${text(entry.note)}` : ""}`);
         if (narrower.length > 20) lines.push(`- ${narrower.length - 20} additional scoped records are in the JSON state.`);
     }
     lines.push("", "## Verification and limits");
@@ -131,9 +137,9 @@ export function createReviewHandoff(model, target, progress, { testRun, warnings
             "- Repository test outcomes are not per-path proof; inspect named-test traces separately where supported.");
     } else lines.push(`- No completed linked-test result is recorded (${text(testRun?.status || "not run")}). No tests were run by exporting this handoff.`);
     lines.push(`- Aggregate coverage report: ${model.coverage?.available ? "available; not named-test or per-path proof" : "not available"}.`,
-        `- ${groupFindings(model.attention || []).length} saved review concerns, not confirmed defects. Concern triage saved in this session is included above; dismissals made only in the browser are not.`,
-        `- ${warnings.length} saved analyzer limitations. AI explanations are interpretations, not proof.`,
-        "- Summary and JSON include file names and human review notes. No source bodies, AI explanations, originating prompts or discussion transcripts are included.",
+        `- ${countLabel(allConcerns.length, "saved review concern")} (${concerns.length} open), not confirmed defects. Concern triage saved in this session is included above; dismissals made only in the browser are not.`,
+        `- ${countLabel(warnings.length, "saved analyzer limitation")}. AI explanations are interpretations, not proof.`,
+        `- The summary includes file names, human review notes${layers?.some((layer) => layer.title || layer.intent) ? ", and AI-written layer titles and one-line layer summaries (each marked)" : ""}. The JSON contains decisions (file and concern triage), notes, the reading position and the source identity. Neither includes source bodies, per-item AI explanations, originating prompts or discussion transcripts.`,
         "- JSON restores decisions only into an exact matching loaded snapshot; it is not a self-contained source archive or a durable canvas link.",
         ...(!importable ? ["- Decision import is unavailable: this worktree contains changed binary or unsnapshotted files whose exact content cannot be established from saved text."] : []),
         "", "This records local human review decisions, not approval. Provider submission, if requested, is a comment-only review.");

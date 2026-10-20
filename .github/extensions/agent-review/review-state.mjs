@@ -29,6 +29,8 @@ import { answerDiscussion } from "./item-discussion.mjs";
 import { layerSummaryContext } from "./layer-summaries.mjs";
 import { workspaceNavigation } from "./web/review-workspace.mjs";
 import { ExplanationValidationError } from "./ai-response.mjs";
+import { groupFindings } from "./web/findings.mjs";
+import { buildReviewPlan, concernPriorities } from "./web/review-plan.mjs";
 import { ANNOTATION_PROMPT_VERSION } from "./ai-prompts.mjs";
 
 // Item explanations written by an older prompt are dropped so the next view regenerates them; the change overview and
@@ -397,7 +399,10 @@ export class ReviewState {
         const target = this.reviewTarget;
         const progress = await this.progressForReview();
         if (this.model !== model || this.reviewTarget !== target) throw new Error("The review changed while preparing the handoff.");
-        const result = createReviewHandoff(model, target, progress, { testRun: this.testRun, layers: this.handoffLayers(model) });
+        const findings = [...groupFindings(model.attention || []), ...(this.generatedObservations || [])];
+        const run = this.testRun ? { ...this.testRun, stale: this.testRun.status === "complete" && this.testRunStale() } : null;
+        const priority = concernPriorities(buildReviewPlan(model, this.decisionMap, run, findings));
+        const result = createReviewHandoff(model, target, progress, { testRun: this.testRun, layers: this.handoffLayers(model), priority });
         const token = randomUUID();
         this.handoffPreview = { token, model, target, revision: progress.revision, snapshot: progress.snapshot,
             body: result.markdown, created: Date.now(), consumed: false };
@@ -417,6 +422,7 @@ export class ReviewState {
         if (this.model !== model || this.reviewTarget !== target) throw new Error("The review changed during import.");
         if (revision !== current.revision) throw new Error("Saved progress changed. Preview the import again; nothing was overwritten.");
         const merged = new Map(Object.entries(current.entries));
+        let changes = 0;
         for (const [id, entry] of incoming) {
             const previous = merged.get(id);
             // An explicit "Not reviewed" with no note carries no decision; treat it like an absent record.
@@ -424,14 +430,21 @@ export class ReviewState {
             if (meaningful && (previous.disposition !== entry.disposition || previous.note !== entry.note)) {
                 throw new Error(`Import conflicts with an existing decision for ${previous.path || id.replace(/^review-file:/, "")}; nothing was overwritten.`);
             }
+            const same = previous ? previous.disposition === entry.disposition && (previous.note || "") === (entry.note || "")
+                : entry.disposition === "pending" && !entry.note;
+            if (!same) changes++;
             merged.set(id, entry);
         }
         const input = { snapshot: current.snapshot, revision: current.revision,
             entries: Object.fromEntries(merged), cursor: current.cursor || artifact.cursor || null };
         await this.validateReviewProgress(input);
-        if (confirm !== true) return { revision: current.revision, records: incoming.size,
-            repository: artifact.repository, identity: artifact.identity, message: "Exact saved source matches. Existing differing decisions are never overwritten." };
-        return this.saveReviewProgress(input);
+        if (confirm !== true) return { revision: current.revision, records: incoming.size, changes,
+            repository: artifact.repository, identity: artifact.identity, message: changes
+                ? "Exact saved source matches. Existing differing decisions are never overwritten."
+                : "Exact saved source matches. Every decision in this file is already saved here." };
+        // Nothing to apply: keep the saved revision so other tabs are not told progress changed.
+        if (!changes) return { ...current, changes: 0, unchanged: true };
+        return { ...await this.saveReviewProgress(input), changes };
     }
 
     async submitHandoff({ token, confirm }) {

@@ -22,6 +22,24 @@ const model = () => ({
     changes: [{ path: "core.js", status: "modified", lines_added: 1, lines_removed: 1 }],
     source_files: { "core.js": { current: "new", diff: "@@ -1 +1 @@\n-old\n+new\n" }, "caller.js": { current: "unchangedCaller();" } },
 });
+test("members tagged modified without their own line changes are shown unchanged, and edges carry short sentences", () => {
+    const value = model();
+    value.nodes.push(
+        { id: "sibling", name: "Sibling", kind: "method", path: "core.js", change: "modified", metrics: { lines_added: 0, lines_removed: 0 } },
+        { id: "elsewhere", name: "Receipt", kind: "method", path: "receipt.js", change: "modified", metrics: { lines_added: 0, lines_removed: 0 } },
+        { id: "type", name: "Policy", kind: "class", path: "core.js", change: "modified", metrics: { lines_added: 0, lines_removed: 0 } },
+    );
+    value.edges.push({ id: "s", source: "sibling", target: "changed", type: "calls", evidence_ids: ["ea"] },
+        { id: "r", source: "changed", target: "elsewhere", type: "calls", evidence_ids: ["ea"] },
+        { id: "t", source: "changed", target: "type", type: "calls", evidence_ids: ["ea"] });
+    const slice = impactSlice(value, "changed");
+    assert.equal(slice.nodes.find((node) => node.id === "type").change, "modified", "classes and packages keep the analyzer's change flag");
+    assert.equal(slice.nodes.find((node) => node.id === "sibling").change, "unchanged", "an untouched member of a modified file");
+    assert.equal(slice.nodes.find((node) => node.id === "elsewhere").change, "unchanged", "a member whose file is not in the diff");
+    assert.equal(slice.nodes.find((node) => node.id === "changed").change, "modified", "a member without line metrics keeps the analyzer flag");
+    assert.equal(slice.edges.find((edge) => edge.id === "a").label, "calls · caller.js:1");
+    assert.equal(slice.edges.find((edge) => edge.id === "c").label, "calls", "no evidence location, no invented one");
+});
 test("impact keeps unchanged consumers, separates dependencies and tests, and preserves edge direction", () => {
     const slice = impactSlice(model(), "finding");
     assert.equal(slice.nodes.find((node) => node.id === "caller").impact_role, "Potential consumer");

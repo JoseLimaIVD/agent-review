@@ -1,6 +1,28 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildReviewPlan } from "../web/review-plan.mjs";
+import { buildReviewPlan, concernPriorities } from "../web/review-plan.mjs";
+import { concernTriage, isConcernSetAside } from "../web/review-ledger.mjs";
+
+test("a concern has one priority: its planned unit's score, else its static impact", () => {
+    const plan = [{ node: { id: "n1" }, score: 100 }, { package: { id: "package:npm:x" }, score: 52 }];
+    plan.units = plan;
+    const priority = concernPriorities(plan);
+    assert.equal(priority({ node_id: "n1", impact_score: 84 }), 100);
+    assert.equal(priority({ package_id: "package:npm:x", impact_score: 40 }), 52);
+    assert.equal(priority({ id: "package:npm:x", impact_score: 40 }), 52);
+    assert.equal(priority({ node_id: "other", impact_score: 68 }), 68);
+    assert.equal(priority({ title: "no score" }), null);
+});
+
+test("concern triage is read from the planned unit and only accepted risks and false positives are set aside", () => {
+    const entries = new Map([["review:n1", { disposition: "accepted" }], ["review:package:npm:x", { disposition: "follow-up" }],
+        ["review:n3", { disposition: "pending" }]]);
+    assert.equal(concernTriage({ node_id: "n1" }, entries), "accepted");
+    assert.equal(isConcernSetAside({ node_id: "n1" }, entries), true);
+    assert.equal(concernTriage({ package_id: "package:npm:x" }, entries), "follow-up");
+    assert.equal(isConcernSetAside({ package_id: "package:npm:x" }, entries), false, "follow-up stays active");
+    assert.equal(concernTriage({ node_id: "n3" }, entries), null, "an explicit Not triaged is no triage");
+});
 
 const node = {
     id: "resolver",

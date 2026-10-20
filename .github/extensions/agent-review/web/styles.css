@@ -1017,6 +1017,9 @@ main { padding: 16px 20px 32px; }
 }
 .edge:hover, .edge:focus { stroke: var(--cp-link); stroke-width: 2; opacity: 1; }
 .edge-label { font-size: 10px; }
+/* Sentence labels sit on the edge with a surface-coloured halo so they stay legible over the line. */
+.edge-label.edge-sentence { fill: var(--cp-text); font: 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-anchor: middle;
+  paint-order: stroke; stroke: var(--cp-surface); stroke-width: 4px; stroke-linejoin: round; pointer-events: none; }
 .graph-viewport-controls {
   padding: 4px;
   box-shadow: none;

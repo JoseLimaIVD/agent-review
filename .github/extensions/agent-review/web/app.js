@@ -11,11 +11,11 @@ import { annotationSections, conciseReviewText, overviewBlurb, reviewCommands, r
 import { isReviewSymbol, isTestPath, languageForPath } from "/languages.mjs";
 import { ConnectionFeedback } from "/connection-feedback.mjs";
 import { describeAnalysisWarning } from "/analysis-limitations.mjs";
-import { buildReviewPlan } from "/review-plan.mjs";
+import { buildReviewPlan, concernPriorities } from "/review-plan.mjs";
 import { fileTree, groupForSource, reviewSequence, workspaceNavigation } from "/review-workspace.mjs";
 import { countLabel, plural } from "/count-format.mjs";
 import {
-    REVIEW_DISPOSITIONS, effectiveDisposition, fileReviewId, fileReviewProgress, isReviewComplete, nextFileReview, parseReviewLedger, reviewProgress,
+    REVIEW_DISPOSITIONS, concernTriage, effectiveDisposition, fileReviewId, fileReviewProgress, isConcernSetAside, isReviewComplete, nextFileReview, parseReviewLedger, reviewProgress,
     reviewSnapshotKey, serializeReviewLedger,
 } from "/review-ledger.mjs";
 import {
@@ -105,6 +105,8 @@ function renderWorkspaceShell() {
     const ready = Boolean(state.payload?.model && !state.reviewPickerPending && !state.reviewSubmitting);
     const reviewing = ready && state.reviewPage === "review";
     document.body.classList.toggle("review-ready", ready);
+    // Code paths is offered only when this review has code-path data to show (loading, complete or a reported failure).
+    elements.explore_paths.classList.toggle("hidden", !state.payload?.decision_map);
     elements.review_workflow.classList.toggle("hidden", !ready);
     document.body.classList.toggle("reviewing", reviewing);
     document.body.classList.toggle("reading-source", reviewing && !elements.source_panel.classList.contains("hidden"));
@@ -332,8 +334,13 @@ function renderWorkspaceNavigation() {
     const changedFile = location && navigation.files.some((file) => file.path === location.path);
     const layer = group && navigation.layers.find((item) => item.id === group.layer);
     const groupLabel = group?.label || group?.title;
-    elements.workspace_group_label.textContent = group ? `${layer && navigation.layers.length > 1
-        ? `${layerLabel(layer)}${groupLabel === layer.name ? "" : " › "}` : ""}${groupLabel === layer?.name && navigation.layers.length > 1 ? "" : groupLabel}`
+    // When the open file is a test or consumer listed under another file's group, name the open file first.
+    const primaryPath = group?.primaries?.[0];
+    const attachedRole = group && !group.cohort && location?.path && primaryPath && !group.primaries.includes(location.path)
+        && group.roles?.get?.(location.path);
+    const openLabel = attachedRole ? `${location.path.split("/").at(-1)} — ${attachedRole === "test" ? "test" : attachedRole === "consumer" ? "consumer" : "related file"} of ${primaryPath.split("/").at(-1)}` : null;
+    elements.workspace_group_label.textContent = group ? `${layer
+        ? `${layerLabel(layer)}${(openLabel || groupLabel) === layer.name ? "" : " › "}` : ""}${openLabel || (groupLabel === layer?.name ? "" : groupLabel)}`
         : (changedFile ? "Changed file · this line is outside its grouped change ranges"
             : state.source ? "Related source outside the changed-file groups" : "Choose a group or file");
     const query = state.navigationQuery.toLowerCase().trim();
@@ -1168,9 +1175,10 @@ function renderCards(container, items, emptyText) {
         const heading = el("div", "card-heading");
         heading.append(el("strong", "", item.title || item.name || item.id));
         if (container === elements.attention) heading.append(el("span", "signal-label", signal.label));
-        if (item.impact_score != null) {
-            const priority = el("b", "impact-score", `Static impact ${item.impact_score}/100`);
-            priority.title = "Static change-impact score for this concern. The focused review queue's Priority also weighs churn, callers and test evidence. Not a vulnerability or package security score.";
+        const priorityValue = item.impact_score != null || item.node_id || item.package_id ? concernPriority(item) : null;
+        if (priorityValue != null) {
+            const priority = el("b", "impact-score", `Static priority ${priorityValue}/100`);
+            priority.title = "Deterministic static priority (not an AI judgement or a security score). Concerns in the focused queue also weigh churn, caller reach and test evidence; others use the analyzer's impact score. The same number appears on the code strip, Attention and the handoff.";
             heading.append(priority);
         }
         card.append(heading, el("span", "card-body", conciseReviewText(item.id?.startsWith("package:") ? `${item.change} · Version ${packageVersionText(item)}` : item.body || item.reason || item.change || "")));
@@ -1188,7 +1196,9 @@ function renderCards(container, items, emptyText) {
         card.title = [item.title, item.body || item.reason].filter(Boolean).join("\n");
         card.addEventListener("click", () => openReviewItem(item));
         if (container === elements.attention) {
-            const closed = isFindingClosed(item, state.closedFindingKeys);
+            const hidden = isFindingClosed(item, state.closedFindingKeys);
+            const triage = concernTriage(item, state.reviewLedger);
+            const closed = hidden || isConcernSetAside(item, state.reviewLedger);
             const wrapper = el("div", `queue-item${closed ? " is-closed" : ""}`);
             wrapper.dataset.itemId = item.id;
             const layer = layerOf(layeredNavigation(), { path: concernPath(item) });
@@ -1198,12 +1208,14 @@ function renderCards(container, items, emptyText) {
                 chip.title = layerLabel(layer);
                 heading.prepend(chip);
             }
-            const toggle = el("button", "queue-toggle", closed ? "Reopen" : "Close");
+            const toggle = el("button", "queue-toggle", hidden ? "Reopen" : "Close");
             toggle.type = "button";
-            toggle.setAttribute("aria-label", `${closed ? "Reopen" : "Close"} ${item.title || item.name}`);
+            toggle.setAttribute("aria-label", `${hidden ? "Reopen" : "Close"} ${item.title || item.name}`);
             toggle.addEventListener("click", () => toggleFinding(item));
-            if (closed) heading.append(el("span", "closed-label", "Closed"));
-            wrapper.append(card, toggle);
+            if (hidden) heading.append(el("span", "closed-label", "Closed"));
+            else if (triage) heading.append(el("span", "closed-label", reviewStateLabel(triage)));
+            // Set-aside concerns are already closed by their triage; change the triage to reopen them.
+            wrapper.append(card, ...(closed && !hidden ? [] : [toggle]));
             const impact = el("button", "link-button", "Impact");
             impact.type = "button";
             impact.setAttribute("aria-label", `Show impact of ${item.title || item.name}`);
@@ -1223,6 +1235,23 @@ function renderCards(container, items, emptyText) {
     }
     if (container === elements.attention) groupConcernsByLayer(container);
 }
+
+// One priority per concern everywhere (cards, strip, Attention, detail, handoff); cached per review state.
+function concernPriority(finding) {
+    const payload = state.payload;
+    const model = payload?.model;
+    if (!model) return finding.impact_score ?? null;
+    const key = `${payload.review_generation}:${payload.decision_map?.status || ""}:${payload.test_run?.completed_at || payload.test_run?.status || ""}:${(payload.generated_observations || []).length}`;
+    if (state.priorityKey !== key) {
+        state.priorityKey = key;
+        state.priorityOf = concernPriorities(buildReviewPlan(model, payload.decision_map, payload.test_run,
+            [...groupFindings(model.attention || []), ...(payload.generated_observations || [])]));
+    }
+    return state.priorityOf(finding);
+}
+
+// Hidden in this browser, or triaged as an accepted risk or false positive.
+const concernClosed = (item) => isFindingClosed(item, state.closedFindingKeys) || isConcernSetAside(item, state.reviewLedger);
 
 function concernPath(item) {
     const model = state.payload?.model;
@@ -1564,7 +1593,7 @@ function renderFileReview() {
         elements.file_review_note.value = record.note || "";
     }
     // A decision can only apply to a file whose source has finished loading.
-    const disabled = !state.progressReady || state.progressSaving || Boolean(state.pendingSource);
+    const disabled = !state.progressReady || state.progressSaving || Boolean(state.pendingSource) || Boolean(state.advancing);
     for (const element of [elements.file_review_disposition, elements.file_review_note, elements.file_review_save, elements.file_review_next]) element.disabled = Boolean(disabled);
     const verb = elements.file_review_disposition.value === "pending" ? "Mark reviewed"
         : elements.file_review_disposition.value === "follow-up" ? "Save follow-up" : "Save";
@@ -1593,22 +1622,28 @@ elements.file_review_disposition.addEventListener("change", keepFileDraft);
 elements.file_review_note.addEventListener("input", keepFileDraft);
 async function saveCurrentFile(advance) {
     const source = state.source;
-    if (!source || state.pendingSource) return;
+    if (!source || state.pendingSource || state.advancing) return;
     const path = source.path;
     const key = `${state.reviewLedgerStorageKey}:${path}`;
     const disposition = advance && elements.file_review_disposition.value === "pending" ? "reviewed" : elements.file_review_disposition.value;
     const entries = new Map(state.reviewLedger);
     entries.set(fileReviewId(path), { disposition, note: elements.file_review_note.value.trim(), path,
         line: currentReviewCursor()?.line || 1, updated_at: new Date().toISOString() });
-    if (!await persistReviewEntries(entries)) return;
-    state.fileReviewDrafts.delete(key);
-    elements.file_review_form.dataset.key = "";
-    renderFileReview();
-    if (advance) {
-        const next = await nextFileFromRail(
-            { path, group: state.navigationMode === "files" ? null : state.activeReviewGroup || null });
-        if (!next || (next.path === path && disposition !== "pending")) openFinishReview();
-        else await openFileReview(next);
+    // One Mark & next at a time: the next file must have opened and stayed on screen briefly before it can be marked.
+    if (advance) state.advancing = true;
+    try {
+        if (!await persistReviewEntries(entries)) return;
+        state.fileReviewDrafts.delete(key);
+        elements.file_review_form.dataset.key = "";
+        renderFileReview();
+        if (advance) {
+            const next = await nextFileFromRail(
+                { path, group: state.navigationMode === "files" ? null : state.activeReviewGroup || null });
+            if (!next || (next.path === path && disposition !== "pending")) openFinishReview();
+            else await openFileReview(next);
+        }
+    } finally {
+        if (advance) setTimeout(() => { state.advancing = false; renderFileReview(); }, 350);
     }
 }
 elements.file_review_save.addEventListener("click", () => saveCurrentFile(false).catch(showError));
@@ -1662,7 +1697,7 @@ function renderFinishReview() {
     const next = overviewDestination();
     if (next) {
         const layer = layerOf(navigation, next);
-        const button = el("button", "review-next", `Continue at ${layer && navigation.layers.length > 1 ? `${layerLabel(layer)} › ` : ""}${next.path.split("/").at(-1)}${next.line ? `:${next.line}` : ""}`);
+        const button = el("button", "review-next", `Continue at ${layer ? `${layerLabel(layer)} › ` : ""}${next.path.split("/").at(-1)}${next.line ? `:${next.line}` : ""}`);
         button.type = "button";
         button.title = `Opens ${next.path}`;
         button.addEventListener("click", () => openOverviewDestination(next).catch(showError));
@@ -1685,12 +1720,15 @@ function renderFinishReview() {
         }
         panel.append(layers);
     }
-    const legacy = [...state.reviewLedger].filter(([id]) => !id.startsWith("review-file:"));
+    const legacy = [...state.reviewLedger].filter(([id, entry]) => !id.startsWith("review-file:") && entry.disposition !== "pending");
     const triagedFollowUp = legacy.filter(([, entry]) => entry.disposition === "follow-up").length;
     if (legacy.length) panel.append(el("p", "muted", `${countLabel(legacy.length, "concern")} triaged${
-        triagedFollowUp ? ` (${triagedFollowUp} need follow-up)` : ""}. Triage explains a concern but does not mark files reviewed.`));
+        triagedFollowUp ? ` (${triagedFollowUp} ${plural(triagedFollowUp, "needs", "need")} follow-up)` : ""}. Triage explains a concern but does not mark files reviewed.`));
     const findings = groupFindings(model.attention || []);
-    panel.append(el("p", "", `${countLabel(findings.filter((item) => !isFindingClosed(item, state.closedFindingKeys)).length, "active concern")} remain in the saved findings.`));
+    const activeCount = findings.filter((item) => !concernClosed(item)).length;
+    const setAside = findings.filter((item) => !isFindingClosed(item, state.closedFindingKeys) && isConcernSetAside(item, state.reviewLedger)).length;
+    panel.append(el("p", "", `${countLabel(activeCount, "active concern")} ${plural(activeCount, "remains", "remain")}${
+        setAside ? ` · ${countLabel(setAside, "concern")} set aside as accepted risk or false positive` : ""}.`));
     const tests = state.payload.test_run;
     panel.append(el("p", "muted", tests?.status === "complete"
         ? `Linked-test run completed: ${tests.counts?.passed || 0} passed, ${tests.counts?.failed || 0} failed. This is separate from human review.`
@@ -1816,8 +1854,9 @@ elements.handoff_import_file.addEventListener("change", async () => {
             body: JSON.stringify({ artifact, revision: current.revision, confirm: false }) });
         if (epoch !== state.handoffEpoch || sequence !== state.handoffImportEpoch || !elements.review_handoff.open) return;
         state.handoffImport = { artifact, revision: preview.revision };
-        elements.handoff_import_preview.textContent = `${preview.repository}: ${countLabel(preview.records, "record")} · ${preview.message}`;
-        elements.handoff_import_confirm.disabled = false;
+        elements.handoff_import_preview.textContent = `${preview.repository}: ${countLabel(preview.records, "record")} · ${
+            preview.changes ? `${countLabel(preview.changes, "decision")} would change` : "nothing would change"} · ${preview.message}`;
+        elements.handoff_import_confirm.disabled = !preview.changes;
     } catch (error) {
         if (epoch === state.handoffEpoch && sequence === state.handoffImportEpoch && elements.review_handoff.open) {
             elements.handoff_import_preview.textContent = "Import not ready. Nothing was imported.";
@@ -1831,10 +1870,14 @@ elements.handoff_import_confirm.addEventListener("click", async () => {
     elements.handoff_import_error.classList.add("hidden");
     try {
         if (!state.handoffImport) throw new Error("Preview an exact matching state file before confirming import.");
-        await api("/api/review-handoff/import", { method: "POST",
+        const result = await api("/api/review-handoff/import", { method: "POST",
             body: JSON.stringify({ ...state.handoffImport, confirm: true }) });
-        elements.handoff_import_preview.textContent = "Decisions imported and saved in this session workspace.";
         state.handoffImport = null;
+        if (result.unchanged) {
+            elements.handoff_import_preview.textContent = "No decisions changed; nothing was saved.";
+            return;
+        }
+        elements.handoff_import_preview.textContent = `${countLabel(result.changes || 0, "decision")} imported and saved in this session workspace.`;
         loadReviewLedger(state.payload.model, { force: true });
         state.handoff = null;
         elements.handoff_markdown_save.disabled = true;
@@ -2311,17 +2354,19 @@ function collapseSizeFindings(items, model) {
         return `${(node?.name || "unit").split(".").pop()} ${lines}`;
     };
     const shown = sizes.slice(0, 4).map(label).join(" · ");
+    // A grouped card carries its highest member priority, matching the handoff's grouped line.
+    const top = Math.max(...sizes.map((item) => concernPriority(item) ?? -1));
     const group = {
         id: "group:size",
         title: `Large changes · ${countLabel(sizes.length, "area")}`,
         body: `${shown}${sizes.length > 4 ? ` · +${sizes.length - 4} more` : ""}`,
-        impact_score: sizes[0].impact_score,
+        impact_score: top >= 0 ? top : null,
         severity: sizes[0].severity,
         collect_mode: "areas",
         members: sizes,
     };
     const rest = items.filter((item) => !sizes.includes(item));
-    const position = rest.findIndex((item) => (item.impact_score || 0) < (group.impact_score || 0));
+    const position = rest.findIndex((item) => (concernPriority(item) ?? 0) < (group.impact_score ?? 0));
     rest.splice(position === -1 ? rest.length : position, 0, group);
     return rest;
 }
@@ -2680,7 +2725,7 @@ function renderReviewOverview() {
     if (destination && navigation) {
         const layer = layerOf(navigation, destination);
         const verb = elements.overview_start.textContent === "Continue review" ? "Continue" : "Start review";
-        elements.overview_start.textContent = `${verb} · ${layer && navigation.layers.length > 1 ? `${layerLabel(layer)} › ` : ""}${destination.path.split("/").at(-1)}${destination.line ? `:${destination.line}` : ""}`;
+        elements.overview_start.textContent = `${verb} · ${layer ? `${layerLabel(layer)} › ` : ""}${destination.path.split("/").at(-1)}${destination.line ? `:${destination.line}` : ""}`;
         elements.overview_start.title = `Opens ${destination.path}${destination.line ? ` at line ${destination.line}` : ""}`;
     }
     const disabled = Boolean(payload.loading || payload.cancelled || state.connectionLost || state.progressLoading);
@@ -3813,7 +3858,7 @@ function renderDetail(item) {
     panel.append(top);
     const metrics = item.metrics || {};
     const fields = [
-        field("Impact score", item.impact_score),
+        field("Static priority", item.impact_score != null || item.node_id || item.package_id ? concernPriority(item) : null),
         field("Change", item.change),
         field("Path", item.path),
         field("Lines", item.start_line ? `${item.start_line}–${item.end_line || item.start_line}` : null),
@@ -3906,7 +3951,7 @@ function renderSourceStrip() {
     const parts = [];
     if (risk) {
         toggle.append(el("strong", "source-strip-title", risk.title));
-        parts.push(el("span", "source-strip-score", `Static priority ${risk.score}`));
+        parts.push(el("span", "source-strip-score", `Static priority ${risk.score}/100`));
         if (risk.reason) parts.push(el("span", "source-strip-reason", risk.reason));
         if (risk.triage) parts.push(el("span", "source-strip-triage", `Triage: ${risk.triage}`));
     }
@@ -6002,9 +6047,9 @@ function renderView() {
     const groupedObservations = [
         ...groupFindings(model.attention || []),
         ...(payload.generated_observations || []),
-    ].sort((a, b) => (b.impact_score || 0) - (a.impact_score || 0));
-    const active = groupedObservations.filter((item) => !isFindingClosed(item, state.closedFindingKeys));
-    const closed = groupedObservations.filter((item) => isFindingClosed(item, state.closedFindingKeys));
+    ].sort((a, b) => (concernPriority(b) ?? 0) - (concernPriority(a) ?? 0));
+    const active = groupedObservations.filter((item) => !concernClosed(item));
+    const closed = groupedObservations.filter((item) => concernClosed(item));
     elements.attention_count.textContent = String(active.length);
     elements.attention_count.title = `${countLabel(active.length, "active finding")} · ${countLabel(closed.length, "closed finding")}`;
     renderCards(elements.attention, [
@@ -6321,9 +6366,9 @@ window.addEventListener("keydown", (event) => {
         event.preventDefault();
         setDiffLayout(diffLayoutPreference() === "split" ? "unified" : "split");
     } else if (key === "m" && state.reviewPage === "review" && !state.exploring && !elements.file_review_form.classList.contains("hidden")) {
-        // Mark the open file and move on, without reaching for the footer (also works in focus mode).
+        // Mark the open file and move on, without reaching for the footer (also works in focus mode). Held keys never mark a run of files.
         event.preventDefault();
-        if (!elements.file_review_next.disabled) elements.file_review_form.requestSubmit(elements.file_review_next);
+        if (!event.repeat && !elements.file_review_next.disabled && !state.advancing) elements.file_review_form.requestSubmit(elements.file_review_next);
     } else if (key === "/") {
         event.preventDefault();
         if (elements.review_search.getClientRects().length) elements.review_search.focus();
