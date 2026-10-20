@@ -23,7 +23,7 @@ export function buildCodePathRequest(model, repoRoot) {
     const tests = [];
     const addedLines = new Map((model.changes || []).map((change) => [change.path.replaceAll("\\", "/"), change.added_lines || []]));
     for (const [originalPath, saved] of Object.entries(model.source_files || {})) {
-        if (!isNodeSourcePath(originalPath) || saved?.binary) continue;
+        if (!isNodeSourcePath(originalPath) || saved?.binary || saved?.generated) continue;
         const path = originalPath.replaceAll("\\", "/");
         sources.push({ path, baseline: saved?.baseline ?? saved?.base ?? null, current: saved?.current ?? null });
         if (isNodeTestPath(path) && typeof saved?.current === "string") {

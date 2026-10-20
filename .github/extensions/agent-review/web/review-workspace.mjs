@@ -87,6 +87,10 @@ export function workspaceNavigation(model, data) {
         group.files.push(byPath.get(path));
         group.roles.set(path, role);
     };
+    const supporting = { id: "workspace:supporting", cohort: false, primaries: [], sections: [], files: [], roles: new Map(),
+        related: [], order: Infinity, supporting: true };
+    // Built bundles and minified files stay reviewable, but never lead or join the reading path.
+    for (const file of files) if (file.generated) assign(file.path, supporting, "generated");
     for (const group of groups) for (const path of group.primaries) assign(path, group, "changed");
     for (const section of behavior) {
         const group = groupBySection.get(section.id);
@@ -115,8 +119,6 @@ export function workspaceNavigation(model, data) {
     const symbolGroups = groups.map((group) => ({ group, names: new Set([
         ...group.files.filter((file) => !isTestPath(file.path)).map((file) => stem(file.path)),
         ...group.sections.map((section) => symbolName(section).replace(/\(.*$/, "").split(".").at(-1).toLowerCase())]) }));
-    const supporting = { id: "workspace:supporting", cohort: false, primaries: [], sections: [], files: [], roles: new Map(),
-        related: [], order: Infinity, supporting: true };
     for (const file of files) {
         if (owner.has(file.path)) continue;
         const name = stem(file.path).replace(/^test_?/, "");
@@ -133,7 +135,7 @@ export function workspaceNavigation(model, data) {
             if (group && home && home !== group && !group.related.some((item) => item.path === path)) group.related.push({ path, group: home.id });
         }
     }
-    const roleOrder = { changed: 0, consumer: 1, "import-linked": 2, related: 3, test: 4, "name-matched test": 5, "unlinked test": 6, supporting: 7 };
+    const roleOrder = { changed: 0, consumer: 1, "import-linked": 2, related: 3, test: 4, "name-matched test": 5, "unlinked test": 6, supporting: 7, generated: 8 };
     const callable = new Set(["function", "method", "constructor", "class", "interface"]);
     const changedSymbols = (path) => (model?.nodes || [])
         .filter((node) => node.path === path && node.change && node.change !== "unchanged" && callable.has(node.kind))

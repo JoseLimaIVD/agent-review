@@ -235,7 +235,7 @@ class Snapshot:
                 self._large_diffs[path] = "".join(patch)
         return self._large_diffs[path]
 
-    def source_files(self, changes: list[dict[str, object]]) -> dict[str, dict[str, object]]:
+    def source_files(self, changes: list[dict[str, object]], generated: set[str] | frozenset[str] = frozenset()) -> dict[str, dict[str, object]]:
         result: dict[str, dict[str, object]] = {}
         retain_baseline = any(
             path.lower().endswith((".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".cts", ".go", ".rs"))
@@ -245,6 +245,10 @@ class Snapshot:
         for change in changes:
             path = str(change["path"])
             before, after = self.baseline.get(path), self.current.get(path)
+            # An unchanged generated bundle is context nobody reads; its text is omitted to keep the review bounded.
+            if path in generated and change["status"] == "unchanged":
+                result[path] = {"generated": True, "omitted": True}
+                continue
             try:
                 base = before.decode("utf-8") if before is not None else ""
                 current = after.decode("utf-8") if after is not None else None
@@ -263,8 +267,14 @@ class Snapshot:
                     fromfile=f"a/{path}", tofile=f"b/{path}", n=4,
                 ))
             result[path] = {"current": current, "diff": diff}
+            if path in generated:
+                result[path]["generated"] = True
             if retain_baseline:
-                result[path]["baseline"] = base if before is not None else None
+                # Identical text is sent once; the extension restores `baseline` from `current` when it reads the model.
+                if change["status"] == "unchanged" and before is not None:
+                    result[path]["baseline_same"] = True
+                else:
+                    result[path]["baseline"] = base if before is not None else None
         return result
 
     def changes(self) -> list[dict[str, object]]:

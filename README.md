@@ -135,6 +135,12 @@ to explain behavior changes, suggest a review order, and distinguish demonstrate
 cases from evidence gaps. Clickable metrics include all reviewable files, not
 just analyzed source languages.
 
+Generated or minified files (built bundles, `*.min.*`, source maps, and JS/CSS
+whose lines are machine-length) remain reviewable as files but are not parsed
+for symbols, sit under **Supporting files** instead of leading the reading path,
+and unchanged ones are not copied into the review. A repository that commits its
+build output therefore stays within the analyzer's bounded model size.
+
 The default **Review plan** ranks changed callables and dependencies by rule-based
 impact, churn, caller reach, and the strongest available test evidence. It updates
 after linked tests run and opens the highest-risk unreviewed or follow-up path

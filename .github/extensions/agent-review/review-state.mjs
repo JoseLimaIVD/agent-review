@@ -182,12 +182,23 @@ export function runAnalyzerProcess(executable, args, onProgress = () => {}, opti
                 return;
             }
             try {
-                resolve(JSON.parse(Buffer.concat(stdout).toString("utf8")));
+                resolve(restoreSharedBaselines(JSON.parse(Buffer.concat(stdout).toString("utf8"))));
             } catch (error) {
                 reject(new Error(`Analyzer returned invalid JSON: ${error.message}`));
             }
         });
     });
+}
+
+// The analyzer sends an unchanged file's text once (`baseline_same`); every consumer expects both sides.
+export function restoreSharedBaselines(model) {
+    for (const saved of Object.values(model?.source_files || {})) {
+        if (saved?.baseline_same) {
+            saved.baseline = saved.current;
+            delete saved.baseline_same;
+        }
+    }
+    return model;
 }
 
 export async function runAnalyzer(repoRoot, baseRef, onProgress, currentRef = null, options = {}) {
@@ -2260,6 +2271,7 @@ export class ReviewState {
         const saved = this.model?.source_files?.[path.replaceAll("\\", "/")];
         if (saved) {
             if (saved.binary) throw new Error(`Cannot display ${path}: the analyzed file is not UTF-8 text.`);
+            if (saved.omitted) throw new Error(`${path} is an unchanged generated or minified file; its text is not kept in this review.`);
             return saved.current;
         }
         if (this.model?.source_files) return null;

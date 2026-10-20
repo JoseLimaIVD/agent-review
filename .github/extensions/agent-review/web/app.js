@@ -5891,7 +5891,9 @@ function renderReviewContext() {
         return block;
     };
     if (!annotation?.body) section("What changed?", [context.change
-        ? `${context.change.status} file: +${context.change.lines_added || 0} / -${context.change.lines_removed || 0} saved lines. Inspect the diff for behavior.`
+        ? context.change.generated
+            ? `${context.change.status} generated or minified file (built output): +${context.change.lines_added || 0} / -${context.change.lines_removed || 0} saved lines. It is not parsed for symbols; review the source that produces it instead.`
+            : `${context.change.status} file: +${context.change.lines_added || 0} / -${context.change.lines_removed || 0} saved lines. Inspect the diff for behavior.`
         : "Related saved source, outside the changed-file scope."]);
     const consumers = context.impact.counts["Potential consumer"];
     const tests = context.impact.counts["Related test"];
