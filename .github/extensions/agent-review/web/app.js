@@ -515,6 +515,7 @@ async function openWorkspaceFile(file, group = null) {
     elements.source_title.textContent = `${file.path} · loading…`;
     elements.source.setAttribute("aria-busy", "true");
     renderWorkspaceNavigation();
+    renderFileReview();
     const range = group?.section?.ranges.find((range) => range.path === file.path && range.side !== "base")
         || group?.section?.ranges.find((range) => range.path === file.path);
     const node = range?.symbol_id && state.payload.model.nodes.find((node) => node.id === range.symbol_id);
@@ -524,6 +525,7 @@ async function openWorkspaceFile(file, group = null) {
     } finally {
         if (state.pendingSource === pending) {
             state.pendingSource = null;
+            renderFileReview();
             if (state.source?.path !== file.path) {
                 elements.source.removeAttribute("aria-busy");
                 elements.source_title.textContent = state.source
@@ -1401,7 +1403,8 @@ function renderFileReview() {
         elements.file_review_disposition.value = record.disposition;
         elements.file_review_note.value = record.note || "";
     }
-    const disabled = !state.progressReady || state.progressSaving;
+    // A decision can only apply to a file whose source has finished loading.
+    const disabled = !state.progressReady || state.progressSaving || Boolean(state.pendingSource);
     for (const element of [elements.file_review_disposition, elements.file_review_note, elements.file_review_save, elements.file_review_next]) element.disabled = Boolean(disabled);
     elements.file_review_next.textContent = elements.file_review_disposition.value === "pending" ? "Mark file reviewed & next"
         : elements.file_review_disposition.value === "follow-up" ? "Save follow-up & next" : "Save & next";
@@ -1423,7 +1426,7 @@ elements.file_review_disposition.addEventListener("change", keepFileDraft);
 elements.file_review_note.addEventListener("input", keepFileDraft);
 async function saveCurrentFile(advance) {
     const source = state.source;
-    if (!source) return;
+    if (!source || state.pendingSource) return;
     const path = source.path;
     const key = `${state.reviewLedgerStorageKey}:${path}`;
     const disposition = advance && elements.file_review_disposition.value === "pending" ? "reviewed" : elements.file_review_disposition.value;

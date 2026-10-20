@@ -41,6 +41,7 @@ try {
     assert.deepEqual(await current(page), { path: target.path, group: target.group }, "the rail moves to the destination immediately");
     assert.match(await page.locator("#source-title").textContent(), new RegExp(`^${target.path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} · loading…$`));
     assert.equal(await page.locator("#source").getAttribute("aria-busy"), "true");
+    assert.equal(await page.locator("#file-review-next").isDisabled(), true, "a decision cannot target a file that has not rendered");
     await page.waitForFunction((path) => document.querySelector("#source-title")?.textContent.startsWith(path)
         && !document.querySelector("#source-title").textContent.includes("loading")
         && document.querySelector("#source")?.getAttribute("aria-busy") !== "true", target.path, { timeout: 15_000 });

@@ -13,9 +13,13 @@ function displayName(node) {
 }
 
 // Impact tiles show the last two qualified segments; namespaces made .NET tests truncate to identical text.
+// File and module nodes keep their whole file name ("contracts.test.js", not "test.js").
 function tileName(node) {
     const name = displayName(node);
     if (!node.impact_role) return name;
+    if (["module", "file"].includes(node.kind) || /[\\/]/.test(name) || /\.(?:[cm]?[jt]sx?|py|cs|go|rs|java|rb|php|kt|swift)$/i.test(name)) {
+        return name.split(/[\\/]/).at(-1);
+    }
     const paren = name.indexOf("(");
     const head = paren >= 0 ? name.slice(0, paren) : name;
     const parts = head.split(".");
@@ -63,7 +67,8 @@ function radialImpactPositions(nodes, edges) {
     for (let ring = 1; ring < rings.length; ring++) {
         const members = rings[ring] || [];
         if (!members.length) continue;
-        radius = Math.max(radius + (ring === 1 && !centreRadius ? 160 : 150), RING_SPACING * members.length / (2 * Math.PI));
+        // Ring gaps leave visible spokes even for diagonal neighbours (tile edges at least ~80px apart).
+        radius = Math.max(radius + (ring === 1 && !centreRadius ? 250 : 230), RING_SPACING * members.length / (2 * Math.PI));
         const parentAngle = (node) => {
             const parents = [...adjacent.get(node.id)].filter((id) => hop.get(id) < ring && angle.has(id)).map((id) => angle.get(id));
             return parents.length ? Math.atan2(parents.reduce((sum, value) => sum + Math.sin(value), 0),
@@ -105,10 +110,14 @@ function impactRadialFrame(nodes, edges, width) {
 
 function wrapLabel(value, max = 24) {
     if (value.length <= max) return [value];
-    const splitAt = value.lastIndexOf(".", max);
-    const index = splitAt > max / 2 ? splitAt + 1 : max;
-    const first = value.slice(0, index);
-    const remainder = value.slice(index);
+    // Split at the last natural boundary (after "." "_" "," or a space, before "(") rather than mid-word.
+    let splitAt = -1;
+    for (let index = Math.min(max, value.length - 1); index > max / 3; index--) {
+        if (/[._, ]/.test(value[index - 1]) || value[index] === "(") { splitAt = index; break; }
+    }
+    const index = splitAt > 0 ? splitAt : max;
+    const first = value.slice(0, index).trimEnd();
+    const remainder = value.slice(index).trimStart();
     return remainder.length <= max ? [first, remainder] : [first, `${remainder.slice(0, max - 1)}…`];
 }
 

@@ -28,10 +28,14 @@ const impactLegibility = (page) => page.evaluate(() => {
     const tiles = [...document.querySelectorAll(".impact-graph .node")].map((node) => ({ id: node.dataset.nodeId,
         rect: node.querySelector("rect").getBoundingClientRect(),
         label: [...node.querySelectorAll(".node-name")].map((text) => text.textContent).join("") }));
-    let overlaps = 0, hidden = 0;
+    let overlaps = 0, hidden = 0, stubs = 0;
     for (let i = 0; i < tiles.length; i++) for (let j = i + 1; j < tiles.length; j++) {
         const a = tiles[i].rect, b = tiles[j].rect;
         if (a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1) overlaps++;
+    }
+    for (const path of document.querySelectorAll(".impact-graph .edge")) {
+        // Layout units, independent of zoom: a spoke shorter than this reads as an arrowhead stub, not a relationship.
+        if (path.getTotalLength() < 40) stubs++;
     }
     for (const path of document.querySelectorAll(".impact-graph .edge:not(.edge-over)")) {
         const length = path.getTotalLength(), matrix = path.getScreenCTM();
@@ -41,7 +45,7 @@ const impactLegibility = (page) => page.evaluate(() => {
             if (tiles.some(({ rect }) => point.x > rect.left + 2 && point.x < rect.right - 2 && point.y > rect.top + 2 && point.y < rect.bottom - 2)) { hidden++; break; }
         }
     }
-    return { overlaps, hidden, duplicateLabels: tiles.length - new Set(tiles.map((tile) => tile.label)).size };
+    return { overlaps, hidden, stubs, duplicateLabels: tiles.length - new Set(tiles.map((tile) => tile.label)).size };
 });
 
 try {
@@ -73,7 +77,7 @@ try {
         let impact = await impactVisibility(page);
         assert.ok(impact.svgHeight <= impact.hostHeight + 1, `impact canvas is a bounded viewport: ${JSON.stringify(impact)}`);
         assert.equal(impact.focusVisible, true, "the changed focus opens in view");
-        assert.deepEqual(await impactLegibility(page), { overlaps: 0, hidden: 0, duplicateLabels: 0 }, "impact relationships stay legible");
+        assert.deepEqual(await impactLegibility(page), { overlaps: 0, hidden: 0, stubs: 0, duplicateLabels: 0 }, "impact relationships stay legible");
         const expand = page.getByRole("button", { name: /Expand one step/ });
         if (await expand.isEnabled()) {
             await expand.click();
@@ -85,7 +89,7 @@ try {
         await page.getByRole("button", { name: "Fit", exact: true }).click();
         impact = await impactVisibility(page);
         assert.equal(impact.visible, impact.total, `Fit shows every impact node: ${JSON.stringify(impact)}`);
-        assert.deepEqual(await impactLegibility(page), { overlaps: 0, hidden: 0, duplicateLabels: 0 }, "expanded impact stays legible");
+        assert.deepEqual(await impactLegibility(page), { overlaps: 0, hidden: 0, stubs: 0, duplicateLabels: 0 }, "expanded impact stays legible");
 
         await page.locator(".impact-graph .node").first().click();
         await page.locator(".impact-evidence").waitFor();
