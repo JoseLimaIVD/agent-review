@@ -59,7 +59,8 @@ try {
                 await page.screenshot({ path: join(process.env.AGENT_REVIEW_SCREENSHOT_DIR, `context-${theme}-${width}.png`) });
             }
             await page.locator("#source-focus").click();
-            assert.equal(await page.locator("#file-review-form").isVisible(), false);
+            assert.equal(await page.locator("#file-review-next").isVisible(), true, "focus mode keeps Mark & next");
+            assert.equal(await page.locator("#file-review-note").isVisible(), false, "focus mode hides the rest of the decision bar");
             assert.equal(await page.locator(".source-side").isVisible(), false);
             assert.equal(await page.locator("#source").evaluate((source) => source.firstElementChild === window.contextSourceRows), true);
             assert.deepEqual(errors, []);

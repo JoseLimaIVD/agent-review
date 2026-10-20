@@ -46,7 +46,14 @@ try {
             const index = sequence.findIndex((entry) => entry.path === current.path && entry.group === current.group);
             const expected = [...sequence.slice(index + 1), ...sequence.slice(0, index + 1)].find((entry) => !reviewed.has(entry.path));
             await page.waitForFunction(() => !document.querySelector("#file-review-next").disabled);
-            await page.locator("#file-review-next").click();
+            assert.match(await page.locator("#file-review-next").textContent(), new RegExp(`& next: ${expected.path.split("/").at(-1).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`),
+                `step ${step + 1}: Mark names the file it opens`);
+            assert.match(await page.locator("#source-position").textContent(), /^\+\d[\d,]* −\d[\d,]*( · file \d+ of \d+ in .+)?$/);
+            // Alternate the button and the M shortcut; both mark this file and open the named one.
+            if (step % 2) {
+                await page.locator("#source").focus();
+                await page.keyboard.press("m");
+            } else await page.locator("#file-review-next").click();
             await page.waitForFunction(({ path, group }) => {
                 const button = document.querySelector(".workspace-file[aria-current='location']");
                 return button?.dataset.path === path && button.dataset.group === group

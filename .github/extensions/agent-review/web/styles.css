@@ -2071,6 +2071,11 @@ body:not(.reviewing):not(.finishing-review) #workspace-freshness, body:not(.revi
 .workspace-folder { padding-left: 10px; font-size: 12px; }
 .workspace-folder > summary { padding: 5px 0; overflow-wrap: anywhere; cursor: pointer; color: var(--cp-text-muted); }
 .workspace-file { display: block; width: 100%; margin: 2px 0; padding: 6px 8px; text-align: left; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--cp-text); font-size: 12px; overflow-wrap: anywhere; cursor: pointer; }
+.workspace-file-meta { float: right; display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; }
+.workspace-file-delta { color: var(--cp-text-muted); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.workspace-file-meta .layer-chip { display: inline-grid; place-items: center; width: 16px; height: 16px; margin: 0; font-size: 10px; }
+.source-position { margin: 2px 0 0; overflow: hidden; font-size: 12px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+.source-heading > div:last-child { min-width: 0; }
 .workspace-file:hover, .workspace-file.is-selected { border-color: var(--cp-border); background: var(--cp-surface-soft); }
 .workspace-file.is-selected { color: var(--cp-link); font-weight: 600; }
 .workspace-file::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border: 1px solid var(--cp-border-strong); border-radius: 50%; }
@@ -2204,7 +2209,11 @@ body.reviewing .source-risk-copy { flex: 0 0 auto; width: 100%; }
 .discussion-tabs { position: sticky; top: 0; z-index: 5; flex: 0 0 auto; margin: -12px -12px 0; padding: 10px 12px; background: var(--cp-surface-soft); border-bottom: 1px solid var(--cp-border); }
 .discussion-mode > .source-review-context, .discussion-mode > .source-origin { display: none; }
 #workspace-discuss { display: inline-block; }
-.review-source-focus #file-review-form { display: none; }
+/* Focus mode keeps a compact decision bar: the disposition and Mark & next, nothing else. */
+.review-source-focus #file-review-form { grid-template-columns: auto auto 1fr; padding: 4px 12px; }
+.review-source-focus #file-review-form label > span, .review-source-focus #file-review-note,
+.review-source-focus #file-review-save, .review-source-focus #file-review-status { display: none; }
+.review-source-focus #worktree-notice, .review-source-focus #source-strip { display: none !important; }
 @media (max-width: 1000px) {
   body.reviewing[data-reading-pane="context"] #source-risk { display: none; }
 }
@@ -2234,7 +2243,7 @@ body.reviewing.review-source-focus .source-body { grid-template-columns: minmax(
   .file-review-footer { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .file-review-footer label, .file-review-footer input, #file-review-status { grid-column: 1 / -1; }
   .file-review-footer label select { flex: 1; }
-  #file-review-status:empty { display: none; }
+  #file-review-status:empty, #file-review-status[data-quiet="true"] { display: none; }
 }
 .markdown-table-wrap { max-width: 100%; overflow-x: auto; margin: 8px 0; }
 .markdown-table { border-collapse: collapse; font-size: 12px; min-width: 100%; }

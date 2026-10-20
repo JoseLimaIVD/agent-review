@@ -57,7 +57,7 @@ const state = {
     fileReviewDrafts: new Map(),
 };
 const elements = Object.fromEntries([
-    "source-coverage", "source-strip", "source-strip-toggle", "source-strip-body", "overview-layers", "overview-stats", "overview-limitation",
+    "source-coverage", "source-position", "source-strip", "source-strip-toggle", "source-strip-body", "overview-layers", "overview-stats", "overview-limitation",
     "review-target-form", "review-mode", "review-ref", "review-target-label", "repository-identity", "review-list-refresh", "review-more", "review-options-status", "review-picker-notice", "clean-review", "change-brief",
     "review-overview", "review-background", "overview-title", "overview-description", "overview-progress", "overview-scope", "overview-start", "overview-files",
     "review-workflow", "workflow-overview", "workflow-review", "workflow-finish", "review-finish", "workspace-target", "workspace-freshness", "workspace-find", "workspace-nav-toggle",
@@ -364,6 +364,19 @@ function renderWorkspaceNavigation() {
                 button.dataset.path = file.path;
                 button.dataset.group = owner?.id || "";
                 button.title = file.path;
+                if (state.navigationMode === "files") {
+                    const layer = layerOf(navigation, { path: file.path });
+                    const meta = el("span", "workspace-file-meta");
+                    meta.append(el("span", "workspace-file-delta", `+${file.lines_added || 0} −${file.lines_removed || 0}`));
+                    if (layer) {
+                        const chip = el("span", "layer-chip layer-chip-inline", layer.number ? String(layer.number) : "·");
+                        chip.title = layerLabel(layer);
+                        meta.append(chip);
+                    }
+                    button.append(meta);
+                    button.dataset.delta = `${file.lines_added || 0} added, ${file.lines_removed || 0} removed lines`;
+                    button.title = `${file.path} · +${file.lines_added || 0} −${file.lines_removed || 0}${layer ? ` · ${layerLabel(layer)}` : ""}`;
+                }
                 button.addEventListener("click", () => openWorkspaceFile(file, owner).catch(showError));
                 container.append(button);
             }
@@ -499,7 +512,7 @@ function renderWorkspaceNavigation() {
         const disposition = state.reviewLedger.get(fileReviewId(button.dataset.path))?.disposition || "pending";
         button.dataset.reviewState = disposition;
         button.setAttribute("aria-label", `${button.dataset.path}${button.dataset.role && button.dataset.role !== "changed" ? `, ${button.dataset.role}` : ""}${
-            button.dataset.symbols ? `, changes ${button.dataset.symbols}` : ""} · ${reviewStateLabel(disposition)}`);
+            button.dataset.symbols ? `, changes ${button.dataset.symbols}` : ""}${button.dataset.delta ? `, ${button.dataset.delta}` : ""} · ${reviewStateLabel(disposition)}`);
     }
     const reviewedIn = (files) => files.filter((file) => state.reviewLedger.get(fileReviewId(file.path))?.disposition === "reviewed").length;
     for (const count of elements.workspace_nav_list.querySelectorAll("[data-group-progress]")) {
@@ -526,6 +539,7 @@ async function openWorkspaceFile(file, group = null) {
     const pending = { path: file.path };
     state.pendingSource = pending;
     elements.source_title.textContent = `${file.path} · loading…`;
+    renderSourcePosition(file.path);
     elements.source.setAttribute("aria-busy", "true");
     renderWorkspaceNavigation();
     renderFileReview();
@@ -597,6 +611,7 @@ function setSourceFocus(active) {
     document.body.classList.toggle("review-source-focus", active);
     elements.source_focus.setAttribute("aria-pressed", String(active));
     elements.source_focus.textContent = active ? "Exit focus" : "Focus code";
+    elements.source_focus.title = active ? "Exit focus mode (F or Esc)" : "Hide the rail and context; keep Mark & next (F)";
     if (active) state.readingPane = "code";
     renderWorkspaceShell();
 }
@@ -1444,7 +1459,8 @@ elements.review_progress_backup.addEventListener("click", () => {
 });
 
 function fileReviewQueue() {
-    return reviewSequence(workspaceNavigation(state.payload?.model, state.sectionData), state.navigationMode);
+    const cached = state.sectionData && !state.payload?.loading ? layeredNavigation() : null;
+    return reviewSequence(cached || workspaceNavigation(state.payload?.model, state.sectionData), state.navigationMode);
 }
 
 // Review groups load asynchronously; choosing a file before they arrive would treat every file as supporting.
@@ -1501,6 +1517,36 @@ async function resumeReviewCursor(cursor) {
         { focus: true, tab: cursor.tab, nav: "reset" });
 }
 
+// Where this file sits and how big it is: "+56 −8 · file 2 of 3 in 2. Apply verified export corrections".
+function renderSourcePosition(path) {
+    const change = state.payload?.model?.changes?.find((item) => item.path === path && item.status !== "unchanged");
+    const navigation = change && layeredNavigation();
+    const layer = navigation && layerOf(navigation, { path });
+    const parts = [];
+    if (change) parts.push(`+${(change.lines_added || 0).toLocaleString()} −${(change.lines_removed || 0).toLocaleString()}`);
+    if (layer) {
+        const groups = new Set(layer.groups.map((group) => group.id));
+        const files = [...new Set(reviewSequence(navigation).filter((entry) => groups.has(entry.group)).map((entry) => entry.path))];
+        const index = files.indexOf(path);
+        if (index >= 0) parts.push(`file ${index + 1} of ${files.length} in ${layerLabel(layer)}`);
+    }
+    if (!change) parts.push("related source, outside the change");
+    elements.source_position.textContent = parts.join(" · ");
+    elements.source_position.title = parts.join(" · ");
+}
+
+// The file "Mark … & next" will open, so the button can name its target.
+function nextFileLabel() {
+    const source = state.source;
+    if (!source) return null;
+    const disposition = elements.file_review_disposition.value === "pending" ? "reviewed" : elements.file_review_disposition.value;
+    const entries = new Map(state.reviewLedger);
+    entries.set(fileReviewId(source.path), { disposition, path: source.path });
+    const next = nextFileReview(fileReviewQueue(), entries,
+        { path: source.path, group: state.navigationMode === "files" ? null : state.activeReviewGroup || null });
+    return next && next.path !== source.path ? next.path : null;
+}
+
 function renderFileReview() {
     const source = state.source;
     const changed = source && state.payload?.model?.changes?.some((file) => file.path === source.path && file.status !== "unchanged");
@@ -1518,13 +1564,19 @@ function renderFileReview() {
     // A decision can only apply to a file whose source has finished loading.
     const disabled = !state.progressReady || state.progressSaving || Boolean(state.pendingSource);
     for (const element of [elements.file_review_disposition, elements.file_review_note, elements.file_review_save, elements.file_review_next]) element.disabled = Boolean(disabled);
-    elements.file_review_next.textContent = elements.file_review_disposition.value === "pending" ? "Mark file reviewed & next"
-        : elements.file_review_disposition.value === "follow-up" ? "Save follow-up & next" : "Save & next";
+    const verb = elements.file_review_disposition.value === "pending" ? "Mark reviewed"
+        : elements.file_review_disposition.value === "follow-up" ? "Save follow-up" : "Save";
+    const target = state.pendingSource || !state.sectionData ? undefined : nextFileLabel();
+    elements.file_review_next.textContent = target === undefined ? `${verb} & next`
+        : target ? `${verb} & next: ${target.split("/").at(-1)}` : `${verb} & finish`;
+    elements.file_review_next.title = target ? `Then opens ${target} (M)` : target === null ? "Then opens the review summary (M)" : "Save and open the next file (M)";
     elements.file_review_status.textContent = state.progressError ? `Not saved: ${state.progressError}`
         : state.progressLoading ? "Restoring session progress…" : state.progressSaving ? "Saving…"
             : state.fileReviewDrafts.has(key) ? "Unsaved whole-file decision"
             : state.progressDurable ? "Saved" : "Memory-only progress";
     elements.file_review_status.title = state.progressDurable ? "Progress is saved in this session workspace" : "Progress is memory-only until this provider closes";
+    elements.file_review_status.dataset.quiet = String(!state.progressError && !state.progressLoading && !state.progressSaving
+        && !state.fileReviewDrafts.has(key) && Boolean(state.progressDurable));
     elements.file_review_retry.classList.toggle("hidden", !state.progressError);
 }
 
@@ -4180,6 +4232,7 @@ async function renderSource({ preserveScroll = false } = {}) {
     state.navigationCursor = { path: source.path, group: state.activeReviewGroup || null };
     renderWorkspaceShell();
     elements.source_title.textContent = `${state.source.path}${state.source.start_line ? `:${state.source.start_line}` : ""}`;
+    renderSourcePosition(state.source.path);
     elements.source_section.classList.toggle("hidden", !(state.payload?.model?.changes || [])
         .some((change) => change.path === state.source.path && change.status !== "unchanged"));
     elements.source.setAttribute("aria-busy", "true");
@@ -6173,6 +6226,10 @@ window.addEventListener("keydown", (event) => {
     } else if (key === "f") {
         event.preventDefault();
         setSourceFocus(!state.sourceFocused);
+    } else if (key === "m" && state.reviewPage === "review" && !state.exploring && !elements.file_review_form.classList.contains("hidden")) {
+        // Mark the open file and move on, without reaching for the footer (also works in focus mode).
+        event.preventDefault();
+        if (!elements.file_review_next.disabled) elements.file_review_form.requestSubmit(elements.file_review_next);
     } else if (key === "/") {
         event.preventDefault();
         if (elements.review_search.getClientRects().length) elements.review_search.focus();
