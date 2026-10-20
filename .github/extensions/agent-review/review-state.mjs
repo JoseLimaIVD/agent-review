@@ -29,6 +29,17 @@ import { answerDiscussion } from "./item-discussion.mjs";
 import { layerSummaryContext } from "./layer-summaries.mjs";
 import { workspaceNavigation } from "./web/review-workspace.mjs";
 import { ExplanationValidationError } from "./ai-response.mjs";
+import { ANNOTATION_PROMPT_VERSION } from "./ai-prompts.mjs";
+
+// Item explanations written by an older prompt are dropped so the next view regenerates them; the change overview and
+// layer summaries have their own lifecycles and are kept.
+export function currentAnnotations(annotations) {
+    const kept = {};
+    for (const [key, annotation] of Object.entries(annotations || {})) {
+        if (key === "overview" || key === "layers" || annotation?.prompt_version === ANNOTATION_PROMPT_VERSION) kept[key] = annotation;
+    }
+    return kept;
+}
 import { contextForSection, sectionsFor } from "./review-sections-context.mjs";
 import { annotationCodeContext } from "./annotation-context.mjs";
 import { ReviewProgressStore, validateReviewCursor, validateReviewEntries } from "./review-progress.mjs";
@@ -825,7 +836,7 @@ export class ReviewState {
                 this.model = cached.model;
                 this.reviewEvidence = cached.reviewEvidence || null;
                 this.reviewEvidenceModel = cached.model;
-                this.annotations = cached.annotations;
+                this.annotations = currentAnnotations(cached.annotations);
                 this.decisionMap = cached.decisionMap;
                 this.decisionPromise = cached.decisionMap ? Promise.resolve(cached.decisionMap) : null;
                 this.packageRisks = cached.packageRisks;
@@ -1587,7 +1598,7 @@ export class ReviewState {
     }
 
     async annotationFor(id, supplementalEvidenceIds = []) {
-        if (this.annotations[id]) return this.annotations[id];
+        if (this.annotations[id]?.prompt_version === ANNOTATION_PROMPT_VERSION) return this.annotations[id];
         if (!this.generateAnnotation) throw new Error("Copilot annotation is unavailable.");
         if (this.annotationPromises.has(id)) return this.annotationPromises.get(id);
         const context = this.contextFor(id);
@@ -1631,6 +1642,7 @@ export class ReviewState {
                         limits: context.code_context.evidence_limits,
                     } : null,
                     evidence_ids: Object.keys(context.evidence || {}),
+                    prompt_version: ANNOTATION_PROMPT_VERSION,
                     generated_at: new Date().toISOString(),
                 };
                 if (!annotation.body) throw new Error("Copilot returned an empty annotation.");

@@ -6,6 +6,9 @@ export const ANNOTATION_HEADINGS = [
     "Risk and review focus",
 ];
 
+// Bump when the item-explanation prompt changes meaningfully; saved explanations from older prompts are regenerated.
+export const ANNOTATION_PROMPT_VERSION = 2;
+
 export const OVERVIEW_HEADINGS = ["Summary", "Review order", "Gaps"];
 
 export const PACKAGE_HEADINGS = [
@@ -35,11 +38,14 @@ export function buildAnnotationPrompt(context) {
     return [
         INTERNAL_MARKER,
         "A human is reviewing a code change written by an AI agent. Explain the mechanism well enough to reason about its behavior without reconstructing the implementation themselves.",
-        "For a nontrivial change, aim for 350-650 words; use less for simple code and at most 900 for complex contracts. Depth comes from exact decisions and consequences, not padding.",
+        "For a nontrivial change, aim for 450-800 words; use less for simple code and at most 1000 for complex contracts. Depth comes from exact decisions and consequences, not padding.",
         "Use short paragraphs, numbered execution steps, and focused bullets. Do not compress an entire branch, precedence chain, or example into a 25-word bullet.",
         "Use exactly these Markdown sections in this order:",
         "## What this code is",
-        "State the responsibility and contract: accepted inputs, returned shape/value, side effects, and important rejection or bypass conditions. Name the construct.",
+        "Write this section for a reviewer who has never seen this repository. Use two or three short prose paragraphs (120-250 words), not a terse bullet list, and do not describe the change here; that belongs in a later section.",
+        "Paragraph 1, orientation: in plain language, say what the surrounding application or feature does for its users (for example, 'RefChecker checks the references cited in an academic paper against bibliographic databases and reports mismatches'), then where this code sits in it: web API, command-line tool, background job, UI component, shared library, or test. Infer the application's purpose only from visible names, docstrings, comments, and code; if it is not stated, say it is inferred.",
+        "Paragraph 2, the construct: name it and its kind (class, function, method, module, component) and state its responsibility in one plain sentence. Then give its contract: what callers pass in and what each input means, what it returns or emits and what the key fields mean, its side effects (files, network calls, database or cache writes, progress events, UI updates), and important rejection, skip, or fallback conditions.",
+        "Define every domain term, acronym, and project-specific name the first time it appears (for example, what a 'hallucination', a 'cached identity', or the 'WebUI' is in this project). Never write a bare list of activities such as 'extraction, verification, caching, enrichment'; say what each step does to the data and in what order.",
         "For a file or module, summarize the changed implementation and its integration rather than treating internal helpers as consumers. Do not claim no consumers when dynamic wiring or omitted callers are unverified.",
         "## How the rest of the code uses it",
         "At most 3 bullets, grouping similar consumers, drawn from related_edges, related_symbols, and code_context.usages.",
@@ -107,8 +113,9 @@ export function buildAnnotationVerificationPrompt(context, draft) {
         INTERNAL_MARKER,
         "Independently audit this draft code explanation against the supplied saved source. You are a source-fidelity checker, not the draft's author.",
         "Return the complete corrected explanation, not a critique or a claim of verification. Preserve useful detail, but remove or qualify every unsupported behavioral claim.",
-        "Use exactly these sections in order, with the labeled risk line and at most 900 words:",
+        "Use exactly these sections in order, with the labeled risk line and at most 1000 words:",
         ...ANNOTATION_HEADINGS.map((heading) => `## ${heading}`),
+        "Keep 'What this code is' as a complete orientation for a reader new to the repository: what the application does, where this code sits, the construct's responsibility and contract, and definitions of domain terms. Do not shorten it into a terse summary; correct only unsupported claims.",
         "Risk section first line: **Risk: Low|Medium|High|Critical — <source-grounded rationale>**.",
         "For every before/after example, account for EVERY supplied input field and evaluate each version independently. Do not skip an intermediate operand when an earlier operand is absent. Claim agreement only if both terminal results really agree.",
         "Respect operator scope: in A || (flag ? null : B), flag gates B only. A truthy A wins irrespective of flag. Empty arrays/objects are truthy; a later length guard can skip them without re-entering the earlier fallback.",

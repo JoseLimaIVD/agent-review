@@ -1,6 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { generateIsolatedExplanation } from "../ai-explainer.mjs";
+import { currentAnnotations } from "../review-state.mjs";
+
+test("saved item explanations from an older prompt are regenerated; overview and layer summaries are kept", async () => {
+    const { ANNOTATION_PROMPT_VERSION } = await import("../ai-prompts.mjs");
+    const kept = currentAnnotations({
+        "node:old": { body: "terse" },
+        "node:new": { body: "full", prompt_version: ANNOTATION_PROMPT_VERSION },
+        overview: { body: "overview" },
+        layers: { intents: {} },
+    });
+    assert.deepEqual(Object.keys(kept).sort(), ["layers", "node:new", "overview"]);
+});
 
 import { ExplanationValidationError, selectedModelFromEvents, validateExplanation } from "../ai-response.mjs";
 import {
@@ -143,7 +155,11 @@ test("builds a bounded change-level overview prompt", () => {
 
 test("annotation prompt explains mechanisms and examples instead of enforcing a superficial bullet cap", () => {
     const prompt = buildAnnotationPrompt({});
-    assert.match(prompt, /350-650 words/);
+    assert.match(prompt, /450-800 words/);
+    assert.match(prompt, /never seen this repository/);
+    assert.match(prompt, /what the surrounding application or feature does for its users/);
+    assert.match(prompt, /Define every domain term/);
+    assert.match(prompt, /Never write a bare list of activities/);
     assert.match(prompt, /numbered \*\*Execution order\*\*/);
     assert.match(prompt, /which conflicting value wins/);
     assert.match(prompt, /Example \(derived from source, not executed\)/);
