@@ -210,8 +210,9 @@
             </div>
             <div class="workspace-reading-tools" role="group" aria-label="Reading pane">
                 <button id="workspace-code" type="button" aria-pressed="true">Code</button>
-                <button id="workspace-context" type="button" aria-pressed="false">Context / Discussion</button>
+                <button id="workspace-context" type="button" aria-pressed="false" aria-label="Context / Discussion">Context<span class="narrow-hide"> / Discussion</span></button>
                 <button id="workspace-discuss" type="button">Ask about this</button>
+                <button id="workspace-comment" type="button" title="Comment on the line you are reading (C), or click a line number">Comment</button>
                 <span id="workspace-group-label" class="muted"></span>
             </div>
             <p id="source-context-notice" class="muted source-context-notice hidden" role="status"></p>
@@ -289,6 +290,22 @@
             <p>JSON contains decisions and a reading point, not source or a canvas link. Open the original saved snapshot and import there. Commit reviews need the original Git objects; worktree reviews need the original saved worktree source. Import verifies exact content, never newer worktree files.</p>
             <pre id="handoff-state-preview"></pre>
         </details>
+        <section id="handoff-provider-section" class="handoff-section" aria-label="Submit review to the pull request">
+            <h3>Submit review to the pull request</h3>
+            <p id="handoff-provider" class="muted"></p>
+            <label for="handoff-summary">Your review summary <span class="muted">(optional; posted first, above the Agent Review summary)</span></label>
+            <textarea id="handoff-summary" rows="4" maxlength="10000" placeholder="Leave your overall feedback for the author."></textarea>
+            <fieldset id="handoff-verdict" class="handoff-verdict">
+                <legend>Verdict</legend>
+                <label><input type="radio" name="handoff-verdict" value="COMMENT" checked> Comment <span class="muted">— feedback without a verdict</span></label>
+                <label><input type="radio" name="handoff-verdict" value="APPROVE"> Approve <span class="muted">— ready to merge</span></label>
+                <label><input type="radio" name="handoff-verdict" value="REQUEST_CHANGES"> Request changes <span class="muted">— must be addressed before merging</span></label>
+            </fieldset>
+            <p id="handoff-provider-status" class="muted" role="status" tabindex="-1"></p>
+            <p id="handoff-provider-error" class="error hidden" role="alert"></p>
+            <label class="handoff-confirm"><input id="handoff-confirm" type="checkbox" disabled> <span id="handoff-confirm-text">I reviewed this summary and the line comments and choose to post them under my GitHub identity.</span></label>
+            <button id="handoff-submit" class="handoff-primary" type="button" disabled>Submit review</button>
+        </section>
         <section class="handoff-section" aria-label="Import decisions">
             <h3>Import matching review decisions</h3>
             <p>Preview first. Existing different decisions or notes are never overwritten. Current reading position is retained when present.</p>
@@ -297,14 +314,6 @@
             <p id="handoff-import-preview" class="muted" role="status"></p>
             <p id="handoff-import-error" class="error hidden" role="alert"></p>
             <button id="handoff-import-confirm" type="button" disabled>Confirm decision import</button>
-        </section>
-        <section class="handoff-section" aria-label="GitHub PR handoff">
-            <h3>Optional GitHub PR submission</h3>
-            <p id="handoff-provider" class="muted"></p>
-            <p id="handoff-provider-status" class="muted" role="status" tabindex="-1"></p>
-            <p id="handoff-provider-error" class="error hidden" role="alert"></p>
-            <label class="handoff-confirm"><input id="handoff-confirm" type="checkbox" disabled> I reviewed this exact Markdown and choose to send this summary as a comment-only PR review. This is not approval or a request for changes.</label>
-            <button id="handoff-submit" type="button" disabled>Submit comment-only PR review</button>
         </section>
     </dialog>
     <dialog id="group-review-dialog" class="prompt-manager" aria-labelledby="group-review-title">
@@ -325,7 +334,7 @@
         <p id="review-command-count" class="muted" role="status"></p>
         <ul id="review-command-results" class="review-command-results"></ul>
         <p class="muted">Searches this snapshot's file names, symbols, and findings—not full source text. Results are capped at 30.</p>
-        <p class="muted">With review or source focus: J/K next/previous item, M mark the open file reviewed and go to the next, U switch unified/split diff (wide windows), A ask, I impact, F focus code. Ctrl+K opens this finder outside editable fields. Escape exits focus mode, clears a highlighted range, or returns from source opened in Explore; use Close × to close a file in Review. Ctrl+Enter sends a discussion question.</p>
+        <p class="muted">With review or source focus: J/K next/previous item, M mark the open file reviewed and go to the next, U switch unified/split diff (wide windows), C comment on the line you are reading (or click a changed line's number), A ask, I impact, F focus code. Ctrl+K opens this finder outside editable fields. Escape exits focus mode, clears a highlighted range, or returns from source opened in Explore; use Close × to close a file in Review. Ctrl+Enter sends a discussion question or saves a line comment.</p>
     </dialog>
     <dialog id="repository-picker" class="prompt-manager" aria-labelledby="repository-picker-title">
         <div class="custom-heading">

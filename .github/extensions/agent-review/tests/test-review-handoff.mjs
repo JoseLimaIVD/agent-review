@@ -17,6 +17,7 @@ const modelFor = (root = "C:\\source\\sample") => ({
 const target = { mode: "commit", label: "Commit aaaaaaa", currentRef: head, baseRef: base };
 const entry = { disposition: "follow-up", note: "Check <script> and [links](https://example.invalid).", path: "a.js", line: 2 };
 const progress = { entries: { "review-file:a.js": entry }, cursor: { path: "a.js", line: 2, side: "current", tab: "current", item_id: "file:a.js" } };
+const offline = async () => { throw new Error("offline test"); };
 
 test("handoff defaults contain decisions and evidence limits, never source, transcripts, origin prompts or loopback links", () => {
     const result = createReviewHandoff(modelFor(), target, progress, {
@@ -154,7 +155,7 @@ test("imports preview without mutation, retain current position, reject conflict
 
 test("provider handoff requires explicit fresh confirmation, pins exact preview, and cannot submit twice concurrently", async () => {
     const calls = [];
-    const state = new ReviewState("C:\\source\\sample", { runAnalyzer: async () => modelFor(),
+    const state = new ReviewState("C:\\source\\sample", { runAnalyzer: async () => modelFor(), github: offline,
         submitHandoffReview: async (input) => { calls.push(input); return { id: 42, commit: input.commit }; } });
     state.model = modelFor();
     state.reviewTarget = { ...target, mode: "pr", url: "https://github.com/example/repo/pull/1" };
@@ -172,11 +173,97 @@ test("provider handoff requires explicit fresh confirmation, pins exact preview,
     preview = await state.prepareHandoff();
     const current = await state.progressForReview();
     await state.saveReviewProgress({ ...current, entries: progress.entries });
-    await assert.rejects(state.submitHandoff({ token: preview.token, confirm: true }), /decisions changed/);
+    await assert.rejects(state.submitHandoff({ token: preview.token, confirm: true }), /decisions or comments changed/);
     preview = await state.prepareHandoff();
     state.model = modelFor();
     await assert.rejects(state.submitHandoff({ token: preview.token, confirm: true }), /target changed/);
     assert.equal(calls.length, 1);
+    await state.dispose();
+});
+
+test("a PR review posts the chosen verdict with drafted line comments once, then clears the posted drafts", async (t) => {
+    const root = await mkdtemp(join(tmpdir(), "pr-submit-"));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const calls = [];
+    const diffModel = () => ({ ...modelFor(), source_files: { "a.js": { current: "x\ny\n", baseline: "x\n", diff: "@@ -1 +1,2 @@\n x\n+y\n" } } });
+    const state = new ReviewState(root, { runAnalyzer: async () => diffModel(), workspacePath: root, github: offline,
+        submitHandoffReview: async (input) => { calls.push(input); return { id: 7, state: "CHANGES_REQUESTED", commit: input.commit }; } });
+    state.model = diffModel();
+    state.reviewTarget = { ...target, mode: "pr", url: "https://github.com/example/repo/pull/1" };
+    await assert.rejects(state.updateReviewDraft({ revision: 0, action: "add", comment: { path: "a.js", line: 9, side: "RIGHT", body: "x" } }), /outside the diff/);
+    await state.updateReviewDraft({ revision: 0, action: "add", comment: { path: "a.js", line: 2, side: "RIGHT", body: "Check y." } });
+    const preview = await state.prepareHandoff();
+    assert.equal(preview.provider.comments, 1);
+    assert.doesNotMatch(preview.markdown, /## Line comments/, "on a PR, comments are posted inline rather than in the summary");
+    await assert.rejects(state.submitHandoff({ token: preview.token, confirm: true, event: "MERGE" }), /Comment, Approve or Request changes/);
+    const fresh = await state.prepareHandoff();
+    await state.submitHandoff({ token: fresh.token, confirm: true, event: "REQUEST_CHANGES" });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].event, "REQUEST_CHANGES");
+    assert.deepEqual(calls[0].comments, [{ path: "a.js", line: 2, side: "RIGHT", body: "Check y." }]);
+    assert.equal((await state.reviewDrafts()).comments.length, 0, "posted drafts are cleared");
+    state.reviewTarget = { ...target, mode: "commit" };
+    const local = await state.reviewDrafts();
+    await state.updateReviewDraft({ revision: local.revision, action: "add", comment: { path: "a.js", line: 2, side: "RIGHT", body: "Local note." } });
+    assert.match((await state.prepareHandoff()).markdown, /## Line comments\n.*\n- ` a\.js:2 ` — Local note\./, "without a PR, comments travel in the summary");
+    await state.dispose();
+});
+
+test("a moved PR head pauses posting and Viewed sync, and threads stay anchored to the reviewed commit", async (t) => {
+    const root = await mkdtemp(join(tmpdir(), "pr-moved-"));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const moved = "c".repeat(40);
+    let prHead = head;
+    const mutations = [], posted = [];
+    const github = async (args) => {
+        const query = args.find((arg) => String(arg).startsWith("query=")) || "";
+        if (query.startsWith("query=mutation")) { mutations.push(query); return { data: {} }; }
+        if (query) return { data: { viewer: { login: "reviewer" }, repository: { pullRequest: { id: "PR_1", author: { login: "author" },
+            headRefOid: prHead, state: "OPEN", files: { nodes: [{ path: "a.js", viewerViewedState: "UNVIEWED" }] } } } } };
+        if (String(args[1]).includes("/comments")) return [
+            { id: 1, path: "a.js", line: null, original_line: 2, side: "RIGHT", commit_id: moved, original_commit_id: head, body: "On the reviewed commit", user: { login: "x" } },
+            { id: 2, path: "a.js", line: 1, original_line: 1, side: "RIGHT", commit_id: moved, original_commit_id: moved, body: "On the newer commit", user: { login: "x" } },
+        ];
+        throw new Error(`unexpected gh call ${args.join(" ")}`);
+    };
+    const diffModel = () => ({ ...modelFor(), source_files: { "a.js": { current: "x\ny\n", baseline: "x\n", diff: "@@ -1 +1,2 @@\n x\n+y\n" } } });
+    const state = new ReviewState(root, { runAnalyzer: async () => diffModel(), workspacePath: root, github,
+        submitHandoffReview: async (input) => { posted.push(input); return { id: 8, state: "COMMENTED", commit: input.commit }; } });
+    state.model = diffModel();
+    state.reviewTarget = { ...target, mode: "pr", url: "https://github.com/example/repo/pull/1" };
+    const reviewed = { "review-file:a.js": { disposition: "reviewed", path: "a.js" } };
+
+    prHead = moved;
+    state.prStateCache = null;
+    const sync = await state.syncViewed({}, reviewed);
+    assert.equal(sync.head_moved, true);
+    assert.deepEqual(sync.paths, ["a.js"]);
+    assert.match(sync.message, /newer commits \(ccccccc\)/);
+    assert.equal(mutations.length, 0, "Viewed is not set for code the reviewer has not seen");
+    const view = await state.prReview();
+    assert.equal(view.head_matches, false);
+    assert.equal(view.head, moved);
+    const [onReviewed, onNewer] = view.threads;
+    assert.deepEqual([onReviewed.line, onReviewed.outdated], [2, false], "a thread written on the reviewed commit stays on its original line");
+    assert.equal(onNewer.outdated, true, "a thread on a newer commit is set aside");
+    const blocked = await state.prepareHandoff();
+    assert.equal(blocked.provider.available, false);
+    assert.equal(blocked.provider.head_moved, true);
+    assert.match(blocked.provider.reason, /newer commits/);
+    await assert.rejects(state.updateReviewDraft({ revision: 0, action: "add", comment: { path: "a.js", line: 2, side: "RIGHT", body: "x" } }),
+        /newer commits \(ccccccc\)/, "no new drafts against a moved head");
+
+    prHead = head;
+    state.prStateCache = null;
+    assert.equal((await state.syncViewed({}, reviewed)).synced, 1);
+    assert.equal(mutations.length, 1);
+    assert.match(mutations[0], /markFileAsViewed/);
+    const ready = await state.prepareHandoff();
+    assert.equal(ready.provider.available, true);
+    await assert.rejects(state.submitHandoff({ token: ready.token, confirm: true, summary: 42 }), /summary must be text/);
+    const again = await state.prepareHandoff();
+    await state.submitHandoff({ token: again.token, confirm: true, event: "COMMENT", summary: "  Looks right; one question inline.  " });
+    assert.match(posted[0].body, /^Looks right; one question inline\.\n\n---\n\n# Agent Review handoff/, "the reviewer's words lead the review body");
     await state.dispose();
 });
 
@@ -206,7 +293,7 @@ test("a refreshed preview cannot start another provider review while a receipt i
     let entered, release;
     const started = new Promise((resolve) => { entered = resolve; });
     const receipt = new Promise((resolve) => { release = resolve; });
-    const state = new ReviewState("C:\\source\\sample", { runAnalyzer: async () => modelFor(),
+    const state = new ReviewState("C:\\source\\sample", { runAnalyzer: async () => modelFor(), github: offline,
         submitHandoffReview: async () => { entered(); return receipt; } });
     state.model = modelFor();
     state.reviewTarget = { ...target, mode: "pr", url: "https://github.com/example/repo/pull/1" };

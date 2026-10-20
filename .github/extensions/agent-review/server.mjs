@@ -146,6 +146,18 @@ export function startReviewServer(state, options = {}) {
                 sendJson(res, await state.submitHandoff(await readJson(req)));
                 return;
             }
+            if (req.method === "GET" && pathname === "/api/pr-review") {
+                sendJson(res, await state.prReview());
+                return;
+            }
+            if (req.method === "POST" && pathname === "/api/pr-review/drafts") {
+                try { sendJson(res, await state.updateReviewDraft(await readJson(req))); }
+                catch (error) {
+                    if (error.code !== "review_draft_conflict") throw error;
+                    sendJson(res, { error: error.message, code: error.code }, 409);
+                }
+                return;
+            }
             if (req.method === "POST" && pathname === "/api/review-progress") {
                 try { sendJson(res, await state.saveReviewProgress(await readJson(req))); }
                 catch (error) {

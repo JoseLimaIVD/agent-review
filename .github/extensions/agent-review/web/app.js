@@ -63,14 +63,14 @@ const elements = Object.fromEntries([
     "review-workflow", "workflow-overview", "workflow-review", "workflow-finish", "review-finish", "workspace-target", "workspace-freshness", "workspace-find", "workspace-nav-toggle",
     "workspace-return-source", "review-navigation", "workspace-groups", "workspace-files", "workspace-search", "workspace-count",
     "workspace-nav-list", "workspace-code", "workspace-context", "workspace-group-label", "workspace-group-retry",
-    "workspace-discuss", "source-review-context", "source-origin",
+    "workspace-discuss", "workspace-comment", "source-review-context", "source-origin",
     "explore-priorities", "explore-concerns", "explore-groups", "explore-architecture", "explore-paths", "explore-packages",
     "review-progress-status", "review-progress-retry", "review-progress-backup", "file-review-form", "file-review-label",
     "file-review-disposition", "file-review-note", "file-review-save", "file-review-next", "file-review-status", "file-review-retry",
     "group-review-dialog", "group-review-title", "group-review-scope", "group-review-error", "group-review-confirm", "group-review-cancel",
     "review-handoff", "handoff-close", "handoff-status", "handoff-error", "handoff-refresh", "handoff-markdown",
     "handoff-markdown-save", "handoff-state-save", "handoff-state-preview", "handoff-import-file", "handoff-import-preview",
-    "handoff-import-confirm", "handoff-import-error", "handoff-provider", "handoff-provider-status", "handoff-provider-error", "handoff-confirm", "handoff-submit",
+    "handoff-import-confirm", "handoff-import-error", "handoff-provider", "handoff-provider-section", "handoff-verdict", "handoff-confirm-text", "handoff-provider-status", "handoff-provider-error", "handoff-confirm", "handoff-submit", "handoff-summary",
     "status", "refresh", "cancel-analysis", "analysis-cancelled", "source-context-notice", "connection-notice", "reconnect", "worktree-notice", "worktree-notice-text", "worktree-overview", "error", "analysis-progress", "progress-phase", "progress-message", "progress-percent",
     "progress-bar", "summary", "breadcrumbs", "attention", "attention-count", "packages", "rail-resize", "impact-view", "source-impact",
     "show-evidence", "show-discussion", "item-discussion", "sections-view", "source-section",
@@ -857,6 +857,7 @@ async function discussItem(item = state.selected) {
 elements.show_evidence.addEventListener("click", () => setDiscussionMode(false));
 elements.show_discussion.addEventListener("click", () => discussItem().catch(showError));
 elements.workspace_discuss.addEventListener("click", () => discussItem().catch(showError));
+elements.workspace_comment.addEventListener("click", () => commentOnCurrentLine());
 
 function el(tag, className, text) {
     const node = document.createElement(tag);
@@ -1449,6 +1450,14 @@ async function persistReviewEntries(entries, cursor = currentReviewCursor(), { q
         state.progressRevision = record.revision;
         state.progressDurable = record.durable;
         state.savedReviewCursor = record.cursor;
+        if (record.github_viewed) {
+            state.githubViewed = record.github_viewed;
+            if (state.prReview?.viewed && !record.github_viewed.message) {
+                for (const [id, entry] of Object.entries(record.entries)) {
+                    if (id.startsWith("review-file:")) state.prReview.viewed[id.slice(12)] = entry.disposition === "reviewed";
+                }
+            }
+        } else state.githubViewed = null;
         cacheReviewLedger();
         if (!quiet) render();
         return true;
@@ -1605,6 +1614,11 @@ function renderFileReview() {
         : state.progressLoading ? "Restoring session progress…" : state.progressSaving ? "Saving…"
             : state.fileReviewDrafts.has(key) ? "Unsaved whole-file decision"
             : state.progressDurable ? "Saved" : "Memory-only progress";
+    // On a pull request, report whether GitHub's "Viewed" checkbox followed the last decision on this file.
+    const viewedSync = state.githubViewed;
+    if (viewedSync && (viewedSync.paths || []).includes(state.source?.path) && !state.progressError && !state.progressSaving && !state.fileReviewDrafts.has(key)) {
+        elements.file_review_status.textContent = viewedSync.message ? `Saved · ${viewedSync.message}` : "Saved · Viewed on GitHub updated";
+    }
     elements.file_review_status.title = state.progressDurable ? "Progress is saved in this session workspace" : "Progress is memory-only until this provider closes";
     elements.file_review_status.dataset.quiet = String(!state.progressError && !state.progressLoading && !state.progressSaving
         && !state.fileReviewDrafts.has(key) && Boolean(state.progressDurable));
@@ -1750,7 +1764,17 @@ function renderFinishReview() {
     const details = el("details", "");
     details.append(el("summary", "", "All file decisions"), list);
     panel.append(details);
-    const handoff = el("button", next ? "review-next review-secondary" : "review-next", "Preview / export handoff");
+    const pr = state.prReview;
+    const drafted = pr?.drafts?.comments?.length || 0;
+    if (pr?.available) {
+        const files = (model.changes || []).filter((file) => file.status !== "unchanged");
+        const viewed = files.filter((file) => pr.viewed?.[file.path]).length;
+        panel.append(el("p", "", `Pull request: ${countLabel(drafted, "draft line comment")} ready to post · ${viewed} of ${countLabel(files.length, "file")} marked Viewed on GitHub${
+            pr.threads?.length ? ` · ${countLabel(pr.threads.filter((thread) => !thread.reply_to).length, "existing thread")}` : ""}.`));
+        if (pr.github_error) panel.append(el("p", "error", pr.github_error));
+        if (pr.head_matches === false) panel.append(el("p", "error", `The pull request has newer commits (${String(pr.head || "").slice(0, 7)}) than this review. Re-open it in Agent Review before posting; nothing can be posted from this snapshot.`));
+    } else if (drafted) panel.append(el("p", "muted", `${countLabel(drafted, "line comment")} drafted; they are included in the handoff summary.`));
+    const handoff = el("button", next ? "review-next review-secondary" : "review-next", pr?.available ? "Review & submit to pull request" : "Preview / export handoff");
     handoff.type = "button";
     handoff.disabled = !state.progressReady || state.progressSaving;
     handoff.addEventListener("click", () => openReviewHandoff());
@@ -1801,15 +1825,28 @@ async function openReviewHandoff() {
         elements.handoff_markdown_save.disabled = false;
         elements.handoff_state_save.disabled = false;
         elements.handoff_provider.replaceChildren();
+        // Only a GitHub pull request can receive a review; other targets export locally.
+        elements.handoff_provider_section.classList.toggle("hidden", !preview.provider.url && !preview.provider.pending);
         if (preview.provider.url) {
             const link = el("a", "", preview.provider.url);
             link.href = preview.provider.url;
             link.target = "_blank";
             link.rel = "noopener noreferrer";
-            elements.handoff_provider.append("Destination: ", link, ` · Commit ${preview.provider.commit}. Uses the gh CLI's existing authorization.`);
+            elements.handoff_provider.append("Destination: ", link, ` · Commit ${String(preview.provider.commit || "").slice(0, 12)} · ${
+                countLabel(preview.provider.comments || 0, "line comment")} ${preview.provider.available ? "will be posted with this summary. Uses the gh CLI's existing authorization." : "drafted."}`);
         }
+        elements.handoff_summary.disabled = !preview.provider.available;
+        elements.handoff_verdict.disabled = !preview.provider.available;
+        // GitHub does not allow approving or requesting changes on your own pull request.
+        for (const input of elements.handoff_verdict.querySelectorAll("input")) {
+            const blocked = input.value !== "COMMENT" && preview.provider.own;
+            input.disabled = blocked;
+            input.closest("label").title = blocked ? "GitHub does not allow approving or requesting changes on your own pull request." : "";
+            if (blocked && input.checked) elements.handoff_verdict.querySelector("input[value='COMMENT']").checked = true;
+        }
+        renderHandoffConsent();
         elements.handoff_provider_status.textContent = preview.provider.available
-            ? "No review has been sent from this preview." : preview.provider.reason;
+            ? `No review has been sent from this preview.${preview.provider.own ? " This is your own pull request, so only Comment is available." : ""}` : preview.provider.reason;
         elements.handoff_confirm.disabled = !preview.provider.available;
     } catch (error) {
         if (epoch === state.handoffEpoch && elements.review_handoff.open) {
@@ -1894,6 +1931,24 @@ elements.handoff_import_confirm.addEventListener("click", async () => {
 elements.handoff_confirm.addEventListener("change", () => {
     elements.handoff_submit.disabled = !state.handoff?.provider.available || !elements.handoff_confirm.checked;
 });
+const VERDICT_LABELS = { COMMENT: "comment", APPROVE: "approval", REQUEST_CHANGES: "request for changes" };
+const VERDICT_ARTICLES = { COMMENT: "a comment", APPROVE: "an approval", REQUEST_CHANGES: "a request for changes" };
+const handoffVerdict = () => elements.handoff_verdict.querySelector("input:checked")?.value || "COMMENT";
+// Consent names the exact verdict; changing the verdict requires confirming again.
+function renderHandoffConsent() {
+    const verdict = handoffVerdict();
+    const comments = state.handoff?.provider?.comments || 0;
+    elements.handoff_confirm_text.textContent = `I reviewed this summary${comments ? ` and ${countLabel(comments, "line comment")}` : ""} and choose to post ${comments ? "them" : "it"} as ${
+        VERDICT_ARTICLES[verdict]} under my GitHub identity.`;
+    elements.handoff_submit.textContent = { COMMENT: "Submit comment", APPROVE: "Submit approval", REQUEST_CHANGES: "Request changes" }[verdict];
+    elements.handoff_submit.classList.toggle("handoff-danger", verdict === "REQUEST_CHANGES");
+    elements.handoff_submit.classList.toggle("handoff-primary", verdict !== "REQUEST_CHANGES");
+}
+elements.handoff_verdict.addEventListener("change", () => {
+    elements.handoff_confirm.checked = false;
+    elements.handoff_submit.disabled = true;
+    renderHandoffConsent();
+});
 function handoffProviderStatus(message) {
     elements.handoff_status.textContent = message;
     elements.handoff_provider_status.textContent = message;
@@ -1907,11 +1962,29 @@ elements.handoff_submit.addEventListener("click", async () => {
     elements.handoff_refresh.disabled = true;
     elements.handoff_error.classList.add("hidden");
     elements.handoff_provider_error.classList.add("hidden");
-    handoffProviderStatus("Submitting the exact comment-only review. Waiting for the provider receipt; do not submit again.");
+    const verdict = handoffVerdict();
+    handoffProviderStatus(`Submitting the ${VERDICT_LABELS[verdict]}. Waiting for GitHub's receipt; do not submit again.`);
     try {
         const receipt = await api("/api/review-handoff/submit", { method: "POST",
-            body: JSON.stringify({ token: state.handoff?.token, confirm: elements.handoff_confirm.checked }) });
-        if (epoch === state.handoffEpoch) handoffProviderStatus(`Submitted comment-only review ${receipt.id} on commit ${receipt.commit}. No approval or change request was submitted.`);
+            body: JSON.stringify({ token: state.handoff?.token, confirm: elements.handoff_confirm.checked, event: verdict, summary: elements.handoff_summary.value }) });
+        if (epoch === state.handoffEpoch) {
+            // The preview is consumed: the destination line no longer promises a pending post.
+            const destination = elements.handoff_provider.querySelector("a");
+            elements.handoff_provider.replaceChildren(...(destination ? ["Destination: ", destination] : []),
+                ` · Commit ${String(receipt.commit || "").slice(0, 12)} · review posted.`);
+            elements.handoff_confirm.checked = false;
+            elements.handoff_summary.value = "";
+            handoffProviderStatus(`Posted ${VERDICT_LABELS[verdict]} on commit ${String(receipt.commit || "").slice(0, 12)}${
+                receipt.comments ? ` with ${countLabel(receipt.comments, "line comment")}` : ""}.${receipt.drafts_warning ? ` ${receipt.drafts_warning}` : ""}`);
+            if (receipt.url) {
+                const link = el("a", "", "Open the review on GitHub");
+                link.href = receipt.url;
+                link.target = "_blank";
+                link.rel = "noopener noreferrer";
+                elements.handoff_provider_status.append(" ", link);
+            }
+            loadPrReview({ force: true });
+        }
     } catch (error) {
         if (epoch === state.handoffEpoch) {
             handoffProviderStatus("No submission receipt. Read the error and check the PR before preparing another submission.");
@@ -4442,6 +4515,7 @@ async function renderSource({ preserveScroll = false } = {}) {
     if (elements.source.firstElementChild !== lines) elements.source.replaceChildren(lines);
     elements.source.removeAttribute("aria-busy");
     renderChangeRuler(rows);
+    renderSourceComments();
     const annotation = state.payload?.annotations?.[state.selected?.id];
     const selectedPath = state.selected?.path || state.payload?.model?.nodes?.find((node) =>
         node.id === (state.selected?.node_id || state.selected?.id))?.path;
@@ -4466,6 +4540,366 @@ async function renderSource({ preserveScroll = false } = {}) {
     queueReviewCursor();
     return true;
 }
+
+// ---- Line comments: GitHub threads (read-only) and local drafts that post with the reviewer's review ----
+
+function ensurePrReview() {
+    const payload = state.payload;
+    if (!payload?.model || payload.loading || state.reviewPickerPending) return;
+    const key = `${payload.review_generation}:${JSON.stringify(payload.review_target || {})}`;
+    if (state.prReviewKey === key) return;
+    state.prReviewKey = key;
+    state.commentEditors = new Map();
+    loadPrReview();
+}
+
+async function loadPrReview({ force = false } = {}) {
+    const key = state.prReviewKey;
+    if (!force && state.prReviewLoading === key) return state.prReviewPromise;
+    state.prReviewLoading = key;
+    state.prReviewPromise = (async () => {
+        try {
+            const data = await api("/api/pr-review");
+            if (state.prReviewKey !== key) return;
+            state.prReview = data;
+            state.prReviewError = data.github_error || null;
+        } catch (error) {
+            if (state.prReviewKey !== key) return;
+            state.prReviewError = error.message;
+        } finally {
+            if (state.prReviewLoading === key) state.prReviewLoading = null;
+        }
+        renderSourceComments();
+        renderFileReview();
+        if (state.reviewPage === "finish") renderFinishReview();
+    })();
+    return state.prReviewPromise;
+}
+
+const isChangedPath = (path) => (state.payload?.model?.changes || []).some((file) => file.path === path && file.status !== "unchanged");
+// A PR whose head moved past the reviewed snapshot cannot take comments anchored to what the reviewer is reading.
+const prHeadMoved = () => state.prReview?.available && state.prReview.head_matches === false;
+
+// Lines GitHub can anchor a review comment to (inside a diff hunk), mirrored from the server's validation.
+function commentableLines(diff) {
+    const right = new Set(), left = new Set();
+    let oldLine = 0, newLine = 0, inHunk = false;
+    for (const line of String(diff || "").split(/\r?\n/)) {
+        const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+        if (hunk) { oldLine = Number(hunk[1]); newLine = Number(hunk[2]); inHunk = true; continue; }
+        if (!inHunk || /^(diff --git |index |--- |\+\+\+ |\\ )/.test(line)) continue;
+        if (line.startsWith("+")) right.add(newLine++);
+        else if (line.startsWith("-")) left.add(oldLine++);
+        else if (line.startsWith(" ")) { left.add(oldLine++); right.add(newLine++); }
+    }
+    return { RIGHT: right, LEFT: left };
+}
+
+// On a pull request GitHub's own patch decides which lines take comments; it can have narrower context than the saved diff.
+function commentableFor(source) {
+    const lines = state.prReview?.commentable;
+    if (!lines) return commentableLines(source?.diff);
+    const file = lines[source?.path];
+    return { RIGHT: new Set(file?.RIGHT || []), LEFT: new Set(file?.LEFT || []) };
+}
+
+// The Comment button and C key comment on the line being read, or the nearest commentable line on that side.
+function commentOnCurrentLine() {
+    const source = state.source;
+    if (!source || !isChangedPath(source.path)) { showError(new Error("Open a changed file to comment on it.")); return; }
+    if (prHeadMoved()) { elements.source.querySelector(".review-comment-notice")?.scrollIntoView({ block: "nearest" }); return; }
+    const viewed = viewedSourceLocation();
+    const side = viewed?.side === "base" ? "LEFT" : "RIGHT";
+    const lines = [...commentableFor(source)[side]];
+    if (!lines.length) { showError(new Error("This file has no diff lines on that side to comment on.")); return; }
+    const wanted = viewed?.line || lines[0];
+    const line = lines.reduce((best, item) => Math.abs(item - wanted) < Math.abs(best - wanted) ? item : best, lines[0]);
+    if (!commentRow(line, side)) { showError(new Error(`Line ${line} is not shown in this tab. Open the Diff tab to comment on it.`)); return; }
+    openCommentEditor({ path: source.path, line, side });
+}
+
+function commentRow(line, side) {
+    return elements.source.querySelector(`.code-row[data-${side === "LEFT" ? "old" : "new"}-line="${line}"]`);
+}
+
+// Which side a clicked line number belongs to: the first number column is the base (old) line.
+function lineNumberAnchor(row, number) {
+    const left = number === row.children[0];
+    const line = Number(left ? row.dataset.oldLine : row.dataset.newLine);
+    return line ? { line, side: left ? "LEFT" : "RIGHT" } : null;
+}
+
+// Comment blocks follow their line (after a split pair as a whole) and after any blocks already there.
+function insertAfterLine(row, block) {
+    let anchor = row.closest(".split-pair") || row;
+    while (anchor.nextElementSibling?.matches(".review-comment, .review-comment-editor, .review-comment-inline-note")) anchor = anchor.nextElementSibling;
+    anchor.after(block);
+}
+
+function commentHeader(author, meta, kind) {
+    const header = el("div", "review-comment-header");
+    header.append(el("strong", "", author), el("span", `review-comment-kind kind-${kind}`, meta));
+    return header;
+}
+
+const sideLabel = (side, line) => `${side === "LEFT" ? "base line" : "line"} ${line}`;
+
+function commentBody(text) {
+    const body = el("div", "review-comment-body markdown");
+    renderMarkdown(body, text);
+    return body;
+}
+
+function threadBlock(thread, replies, className, meta) {
+    const block = el("div", className);
+    for (const item of [thread, ...replies]) {
+        const entry = el("div", "review-comment-entry");
+        entry.append(commentHeader(item.author, item === thread ? meta : `reply · ${new Date(item.created_at).toLocaleDateString()}`, "thread"),
+            commentBody(item.body));
+        block.append(entry);
+    }
+    if (thread.url) {
+        const link = el("a", "review-comment-link", "Reply on GitHub");
+        link.href = thread.url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        block.append(link);
+    }
+    return block;
+}
+
+const editorKey = (editor) => editor.id ? `draft:${editor.id}` : `new:${editor.path}:${editor.side}:${editor.line}`;
+const editorDirty = (editor) => editor.body.trim() !== (editor.original || "").trim();
+
+function renderSourceComments() {
+    // Keep the caret in whichever editor is being typed in across re-renders.
+    const active = document.activeElement?.closest?.(".review-comment-editor");
+    const focusKey = active?.dataset.editorKey || state.commentFocusKey;
+    const selection = active ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
+    state.commentFocusKey = null;
+    elements.source.querySelectorAll(".review-comment, .review-comment-editor, .review-comment-outdated, .review-comment-notice, .review-comment-inline-note")
+        .forEach((node) => node.remove());
+    const source = state.source;
+    const data = state.prReview;
+    const moved = prHeadMoved();
+    elements.workspace_comment.disabled = !source || !isChangedPath(source.path) || moved;
+    elements.workspace_comment.title = !source || !isChangedPath(source.path) ? "Open a changed file to comment on it"
+        : moved ? "The pull request has newer commits than this review; re-open it to comment"
+        : `${data?.available ? "Draft a pull request comment" : "Comment"} on the line you are reading (C), or click a line number`;
+    if (!source || elements.source.getAttribute("aria-busy") === "true") return;
+    const path = source.path;
+    const lines = elements.source.querySelector(".code-lines");
+    const commentable = isChangedPath(path) && !moved ? commentableFor(source) : { RIGHT: new Set(), LEFT: new Set() };
+    for (const row of elements.source.querySelectorAll(".code-row")) {
+        for (const number of row.querySelectorAll(":scope > .line-number")) {
+            const anchor = lineNumberAnchor(row, number);
+            number.classList.toggle("commentable", Boolean(anchor && commentable[anchor.side].has(anchor.line)));
+        }
+    }
+    if (!data) return;
+    if (moved && lines) {
+        const notice = el("div", "review-comment-notice");
+        notice.setAttribute("role", "status");
+        notice.append(el("strong", "", "This pull request has newer commits. "), `GitHub's head is ${String(data.head || "").slice(0, 7)}; this review shows ${
+            String(data.reviewed_head || "").slice(0, 7)}. Commenting and Viewed sync are paused so nothing is posted against code you did not read. Re-open the pull request in Agent Review to review the new commits.`);
+        lines.prepend(notice);
+    }
+    const threads = (data.threads || []).filter((thread) => thread.path === path);
+    const repliesTo = (thread) => threads.filter((reply) => reply.reply_to === thread.id);
+    for (const thread of threads.filter((item) => !item.reply_to && !item.outdated)) {
+        const row = commentRow(thread.line, thread.side);
+        if (!row) continue;
+        insertAfterLine(row, threadBlock(thread, repliesTo(thread), "review-comment review-comment-thread",
+            `on GitHub · ${thread.side === "LEFT" ? "base · " : ""}${new Date(thread.created_at).toLocaleDateString()}`));
+    }
+    const outdated = threads.filter((item) => !item.reply_to && item.outdated);
+    if (outdated.length && lines) {
+        const details = el("details", "review-comment-outdated");
+        details.append(el("summary", "", `${countLabel(outdated.length, "comment")} on other commits of this file`));
+        for (const thread of outdated) {
+            details.append(threadBlock(thread, repliesTo(thread), "review-comment-entry",
+                `${sideLabel(thread.side, thread.original_line ?? "?")} on commit ${String(thread.original_commit || "").slice(0, 7) || "unknown"}`));
+        }
+        lines.prepend(details);
+    }
+    const editors = state.commentEditors || new Map();
+    for (const draft of (data.drafts?.comments || []).filter((item) => item.path === path)) {
+        const row = commentRow(draft.line, draft.side);
+        if (!row || editors.has(`draft:${draft.id}`)) continue;
+        const block = el("div", "review-comment review-comment-draft");
+        block.dataset.draftId = draft.id;
+        block.append(commentHeader("Your draft", `${sideLabel(draft.side, draft.line)} · ${data.available ? "pending · posts with your review" : "local · included in the handoff"}`, "draft"),
+            commentBody(draft.body));
+        const actions = el("div", "review-comment-actions");
+        const edit = el("button", "link-button", "Edit");
+        edit.type = "button";
+        edit.setAttribute("aria-label", `Edit draft on ${sideLabel(draft.side, draft.line)}`);
+        edit.addEventListener("click", () => openCommentEditor({ path, line: draft.line, side: draft.side, id: draft.id, body: draft.body }));
+        const remove = el("button", "link-button", "Delete");
+        remove.type = "button";
+        remove.setAttribute("aria-label", `Delete draft on ${sideLabel(draft.side, draft.line)}`);
+        remove.addEventListener("click", async () => {
+            try { await saveDraftChange({ action: "delete", id: draft.id }); }
+            catch (error) { showError(error); }
+            elements.source.focus({ preventScroll: true });
+        });
+        actions.append(edit, remove);
+        block.append(actions);
+        insertAfterLine(row, block);
+    }
+    for (const [key, editor] of editors) {
+        if (editor.path !== path) continue;
+        const row = commentRow(editor.line, editor.side);
+        if (!row) continue;
+        const block = commentEditorBlock(key, editor);
+        insertAfterLine(row, block);
+        if (key === focusKey) {
+            const textarea = block.querySelector("textarea");
+            requestAnimationFrame(() => {
+                textarea.focus({ preventScroll: !!selection });
+                if (selection) textarea.setSelectionRange(...selection);
+            });
+        }
+    }
+    const note = state.commentNote;
+    if (note?.path === path) {
+        const row = commentRow(note.line, note.side);
+        if (row) {
+            const node = el("p", "review-comment-inline-note", note.message);
+            node.setAttribute("role", "status");
+            insertAfterLine(row, node);
+        }
+    }
+}
+
+function commentEditorBlock(key, editor) {
+    const block = el("div", "review-comment-editor");
+    block.dataset.editorKey = key;
+    const label = `${editor.path.split("/").at(-1)}:${editor.line}${editor.side === "LEFT" ? " (base)" : ""}`;
+    const textarea = el("textarea", "");
+    textarea.rows = 3;
+    textarea.maxLength = 4000;
+    textarea.value = editor.body;
+    textarea.setAttribute("aria-label", `Comment on ${label}`);
+    textarea.placeholder = state.prReview?.available ? "Leave a comment. It posts when you submit your review." : "Leave a comment. It is saved locally and included in the handoff.";
+    textarea.addEventListener("input", () => { editor.body = textarea.value; });
+    const error = el("p", "error", editor.error || "");
+    error.setAttribute("role", "alert");
+    error.classList.toggle("hidden", !editor.error);
+    const actions = el("div", "review-comment-actions");
+    const cancel = el("button", "", "Cancel");
+    cancel.type = "button";
+    const save = el("button", "review-comment-save", editor.id ? "Save comment" : "Add comment");
+    save.type = "button";
+    save.disabled = Boolean(editor.saving);
+    const submit = async () => {
+        if (editor.saving) return;
+        editor.saving = true;
+        editor.error = null;
+        save.disabled = true;
+        error.classList.add("hidden");
+        try {
+            await saveDraftChange(editor.id ? { action: "edit", id: editor.id, body: editor.body }
+                : { action: "add", comment: { path: editor.path, line: editor.line, side: editor.side, body: editor.body } });
+            state.commentEditors.delete(key);
+            renderSourceComments();
+            elements.source.focus({ preventScroll: true });
+        } catch (failure) {
+            editor.saving = false;
+            editor.error = failure.message;
+            // A draft deleted elsewhere cannot be edited; keep the text as a new comment on the same line instead.
+            if (failure.code === "draft_missing") {
+                state.commentEditors.delete(key);
+                delete editor.id;
+                editor.original = "";
+                editor.error = "This draft was deleted in another tab. Your text is kept here; select Add comment to save it as a new comment.";
+                state.commentEditors.set(editorKey(editor), editor);
+                state.commentFocusKey = editorKey(editor);
+            } else state.commentFocusKey = key;
+            renderSourceComments();
+        }
+    };
+    cancel.addEventListener("click", () => { state.commentEditors.delete(key); renderSourceComments(); elements.source.focus({ preventScroll: true }); });
+    save.addEventListener("click", submit);
+    textarea.addEventListener("keydown", (event) => {
+        if ((event.ctrlKey || event.metaKey) && event.key === "Enter") { event.preventDefault(); submit(); }
+        if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); cancel.click(); }
+    });
+    actions.append(cancel, save);
+    block.append(el("p", "review-comment-target muted", `${editor.id ? "Edit comment" : "Comment"} on ${label}`), textarea, error, actions);
+    return block;
+}
+
+// Several editors can be open at once, like on GitHub; opening one never discards text typed in another.
+async function openCommentEditor(editor) {
+    if (!isChangedPath(editor.path)) { showError(new Error("Comments can only be added to changed files.")); return; }
+    // Comments may still be loading from GitHub; open the editor as soon as they arrive rather than refusing.
+    if (!state.prReview) {
+        ensurePrReview();
+        await state.prReviewPromise;
+        if (!state.prReview) { showError(new Error(state.prReviewError || "Review comments could not be loaded.")); return; }
+        if (state.source?.path !== editor.path) return;
+    }
+    if (prHeadMoved()) { renderSourceComments(); return; }
+    state.commentEditors ||= new Map();
+    const key = editorKey(editor);
+    if (!state.commentEditors.has(key)) state.commentEditors.set(key, { ...editor, body: editor.body || "", original: editor.body || "" });
+    state.commentNote = null;
+    state.commentFocusKey = key;
+    renderSourceComments();
+}
+
+window.addEventListener("beforeunload", (event) => {
+    if ([...(state.commentEditors?.values() || [])].some(editorDirty)) event.preventDefault();
+});
+
+async function saveDraftChange(change) {
+    const drafts = state.prReview?.drafts;
+    if (!drafts) throw new Error("Review comments are still loading.");
+    const send = (revision) => api("/api/pr-review/drafts", { method: "POST", body: JSON.stringify({ revision, ...change }) });
+    const missing = (list) => change.id && !list.comments.some((comment) => comment.id === change.id);
+    if (missing(drafts)) {
+        if (change.action === "delete") return;
+        throw Object.assign(new Error("This draft was deleted in another tab."), { code: "draft_missing" });
+    }
+    let result;
+    try { result = await send(drafts.revision); }
+    catch (error) {
+        if (error.status !== 409) throw error;
+        // Another tab changed the drafts: reload them and apply this one change on top.
+        await loadPrReview({ force: true });
+        const current = state.prReview?.drafts;
+        if (!current) throw new Error("Review comments could not be reloaded; your text is kept. Try again.");
+        if (missing(current)) {
+            if (change.action === "delete") return;
+            throw Object.assign(new Error("This draft was deleted in another tab."), { code: "draft_missing" });
+        }
+        result = await send(current.revision);
+    }
+    state.prReview = { ...state.prReview, drafts: result };
+    renderSourceComments();
+    renderFileReview();
+}
+
+// Clicking a line number starts a comment on that side of that line.
+elements.source.addEventListener("click", (event) => {
+    const number = event.target.closest?.(".line-number");
+    const row = number?.closest(".code-row");
+    if (!number || !row || !state.source || !isChangedPath(state.source.path)) return;
+    const anchor = lineNumberAnchor(row, number);
+    if (!anchor) return;
+    if (prHeadMoved()) return;
+    if (!commentableFor(state.source)[anchor.side].has(anchor.line)) {
+        // Explain beside the line rather than with the page-wide error banner.
+        state.commentNote = { path: state.source.path, ...anchor,
+            message: state.prReview?.commentable
+                ? `${sideLabel(anchor.side, anchor.line)} is outside the pull request's diff on GitHub, so GitHub cannot anchor a comment there. Comment on a changed or nearby line.`
+                : `${sideLabel(anchor.side, anchor.line)} is outside the diff. Comment on a changed or nearby line.` };
+        renderSourceComments();
+        return;
+    }
+    openCommentEditor({ path: state.source.path, ...anchor });
+});
 
 function applySourceFocus(rows, focusStart, focusEnd, focusSide) {
     const focused = [];
@@ -6027,6 +6461,7 @@ function renderView() {
     }
     loadClosedFindingKeys(model);
     loadReviewLedger(model);
+    ensurePrReview();
     if (state.queueError) showError(new Error(state.queueError));
     if (state.reviewLedgerError) showError(new Error(state.reviewLedgerError));
     if (!state.connectionLost && !payload.loading && !payload.cancelled) {
@@ -6362,6 +6797,9 @@ window.addEventListener("keydown", (event) => {
     } else if (key === "f") {
         event.preventDefault();
         setSourceFocus(!state.sourceFocused);
+    } else if (key === "c" && state.source && !elements.source_panel.classList.contains("hidden")) {
+        event.preventDefault();
+        commentOnCurrentLine();
     } else if (key === "u" && state.source && state.sourceTab === "diff" && innerWidth >= SPLIT_DIFF_MIN_WIDTH) {
         event.preventDefault();
         setDiffLayout(diffLayoutPreference() === "split" ? "unified" : "split");

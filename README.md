@@ -109,13 +109,25 @@ different content or conflicting existing decisions is rejected, not replaced
 with newer worktree source. Binary/unsnapshotted worktree content cannot be
 verified for portable import and is explicitly unsupported.
 
-For a loaded GitHub PR, the same preview supports an explicitly selected,
-confirmed **comment-only** review through the existing `gh` CLI authorization.
-It never approves or requests changes. The original commit is pinned and the PR
-head is rechecked before posting; changed targets/decisions, stale previews and
-duplicate submissions are rejected. A network failure may leave the remote
-outcome unknown: check the PR before preparing another submission. Local and
-commit reviews remain fully usable without creating a PR.
+**Line comments.** Click a changed line's number, press **C**, or use **Comment**
+to draft a comment under that line (Ctrl+Enter saves, Esc cancels). Several
+drafts can be open at once and typed text is never discarded implicitly. Drafts
+are saved in the session workspace per snapshot and are revision-checked across
+tabs. On a commit or worktree review they are included in the handoff Markdown.
+
+For a loaded GitHub PR, existing review threads appear under their lines (threads
+on other commits are grouped separately), marking a file reviewed toggles
+GitHub's per-file **Viewed** checkbox, and the same preview submits one review
+through the existing `gh` CLI authorization: the reviewer's optional summary,
+the Agent Review summary and the drafted line comments, as an explicitly chosen
+**Comment**, **Approve** or **Request changes** verdict (GitHub forbids the last
+two on your own PR). Only lines inside GitHub's own PR diff can take comments.
+The original commit is pinned and the PR head is rechecked: once the PR has newer
+commits, commenting, Viewed sync and submission pause until the PR is reopened.
+Changed targets/decisions/drafts, stale previews and duplicate submissions are
+rejected. A network failure may leave the remote outcome unknown: check the PR
+before preparing another submission. Local and commit reviews remain fully
+usable without creating a PR.
 
 A change brief shows file mix, source/test churn, coverage availability, and the
 originating request. Copilot uses bounded, saved implementation and test excerpts

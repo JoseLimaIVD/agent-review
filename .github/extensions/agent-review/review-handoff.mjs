@@ -21,7 +21,7 @@ export function handoffIdentity(model, target) {
         mode: target.mode }, source_files }, `review-handoff-v1:${JSON.stringify(changes)}`, null);
 }
 
-export function createReviewHandoff(model, target, progress, { testRun, warnings = model.warnings || [], layers = null, priority = null } = {}) {
+export function createReviewHandoff(model, target, progress, { testRun, warnings = model.warnings || [], layers = null, priority = null, comments = [] } = {}) {
     const entries = new Map(Object.entries(progress.entries));
     const counts = fileReviewProgress(model, entries);
     const files = (model.changes || []).filter((file) => file.status !== "unchanged");
@@ -117,6 +117,12 @@ export function createReviewHandoff(model, target, progress, { testRun, warnings
         if (byTitle.size > 15) lines.push(`- ${byTitle.size - 15} further concern types are listed in Agent Review.`);
     }
     const narrower = [...entries].filter(([id, entry]) => !id.startsWith("review-file:") && entry.disposition !== "pending");
+    if (comments.length) {
+        lines.push("", "## Line comments", "Reviewer comments anchored to the saved diff (base side marked).");
+        const sorted = [...comments].sort((a, b) => a.path.localeCompare(b.path) || a.line - b.line);
+        for (const comment of sorted.slice(0, 100)) lines.push(`- ${code(`${comment.path}:${comment.line}`)}${comment.side === "LEFT" ? " (base)" : ""} — ${text(comment.body)}`);
+        if (sorted.length > 100) lines.push(`- ${sorted.length - 100} further comments are kept in Agent Review.`);
+    }
     if (narrower.length) {
         lines.push("", "## Concern triage", "Triage explains why a concern was set aside; it does not mark files reviewed.");
         const nodesById = new Map((model.nodes || []).map((node) => [node.id, node]));
@@ -142,7 +148,7 @@ export function createReviewHandoff(model, target, progress, { testRun, warnings
         `- The summary includes file names, human review notes${layers?.some((layer) => layer.title || layer.intent) ? ", and AI-written layer titles and one-line layer summaries (each marked)" : ""}. The JSON contains decisions (file and concern triage), notes, the reading position and the source identity. Neither includes source bodies, per-item AI explanations, originating prompts or discussion transcripts.`,
         "- JSON restores decisions only into an exact matching loaded snapshot; it is not a self-contained source archive or a durable canvas link.",
         ...(!importable ? ["- Decision import is unavailable: this worktree contains changed binary or unsnapshotted files whose exact content cannot be established from saved text."] : []),
-        "", "This records local human review decisions, not approval. Provider submission, if requested, is a comment-only review.");
+        "", target.mode === "pr" ? "Submitting posts this summary and any drafted line comments as one review under your GitHub identity." : "This records local human review decisions, not approval.");
     return { markdown: lines.join("\n"), artifact, counts };
 }
 
