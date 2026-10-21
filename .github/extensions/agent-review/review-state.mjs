@@ -40,6 +40,8 @@ export function currentAnnotations(annotations) {
     for (const [key, annotation] of Object.entries(annotations || {})) {
         if (key === "overview" || key === "layers" || annotation?.prompt_version === ANNOTATION_PROMPT_VERSION) kept[key] = annotation;
     }
+    // A summary saved while it was being refined is shown as it was; the refinement itself did not survive the restart.
+    if (kept.overview?.refining) kept.overview = { ...kept.overview, refining: false };
     return kept;
 }
 import { contextForSection, sectionsFor } from "./review-sections-context.mjs";
@@ -129,6 +131,26 @@ export async function loadReviewConfig(repoRoot) {
         if (error.code === "ENOENT") return {};
         throw new Error(`Unable to load ${path}: ${error.message}`);
     }
+}
+
+const OVERVIEW_REVIEW_PROMPT = "Explain observable before/after behavior across this change. Collect concrete correctness risks and test evidence. Investigate cross-file contracts, defaults and units.";
+
+// Review evidence replaces raw code excerpts in the summary context: confirmed concerns first, within a fixed budget.
+function applyOverviewEvidence(context, review) {
+    let remaining = 28_000;
+    const evidence = [];
+    for (const item of [...review.findings, ...review.observations]) {
+        const characters = JSON.stringify(item).length;
+        if (characters > remaining) continue;
+        evidence.push(item);
+        remaining -= characters;
+    }
+    context.code_context = [];
+    context.review_evidence = evidence;
+    context.evidence_limits = { ...review.coverage, status: review.status,
+        omitted_records: review.findings.length + review.observations.length - evidence.length,
+        gaps: review.gaps.slice(0, 10), omitted_gaps: Math.max(0, review.gaps.length - 10) };
+    return context;
 }
 
 export function runAnalyzerProcess(executable, args, onProgress = () => {}, options = {}) {
@@ -1482,8 +1504,8 @@ export class ReviewState {
                 this.reviewEvidence = result;
                 this.reviewEvidenceModel = model;
                 this.reviewEvidenceRevision++;
-                delete this.annotations.overview;
-                this.annotationPromises.delete("overview");
+                // Keep the summary on screen and rewrite it from the new evidence, rather than discarding it.
+                if (this.annotations.overview) this.refineOverview();
             }
             return result;
         } finally {
@@ -1911,33 +1933,17 @@ export class ReviewState {
         if (this.annotationPromises.has("overview")) return this.annotationPromises.get("overview");
         const generation = this.reviewGeneration;
         let evidenceRevision = null;
+        // The first summary comes from the saved code with one model call. When deeper review evidence is not ready yet,
+        // the summary is refined from it in the background instead of making the reader wait minutes for any summary.
         const promise = (async () => {
             const history = this.refreshHistoricalSessionContexts();
             if (history) await history;
             if (this.decisionMap?.status === "loading") await this.decisionMapFor();
             if (generation !== this.reviewGeneration) throw new Error("The review changed while loading summary context.");
             const context = this.overviewContext();
-            if (this.generateReviewPass) {
-                if (this.ruleCheck?.status === "running") await this.ruleCheckPromise;
-                let review = this.reviewEvidenceModel === this.model ? this.reviewEvidence : null;
-                if (!review) review = await this.internalReview(
-                    "Explain observable before/after behavior across this change. Collect concrete correctness risks and test evidence. Investigate cross-file contracts, defaults and units.",
-                    { scope: "overview" });
-                if (generation !== this.reviewGeneration) throw new Error("The review changed while collecting summary evidence.");
-                let remaining = 28_000;
-                const evidence = [];
-                // Rank confirmed concerns before behavior observations; keep underlying records intact.
-                for (const item of [...review.findings, ...review.observations]) {
-                    const characters = JSON.stringify(item).length;
-                    if (characters > remaining) continue;
-                    evidence.push(item);
-                    remaining -= characters;
-                }
-                context.code_context = [];
-                context.review_evidence = evidence;
-                context.evidence_limits = { ...review.coverage, status: review.status,
-                    omitted_records: review.findings.length + review.observations.length - evidence.length,
-                    gaps: review.gaps.slice(0, 10), omitted_gaps: Math.max(0, review.gaps.length - 10) };
+            const review = this.generateReviewPass && this.reviewEvidenceModel === this.model ? this.reviewEvidence : null;
+            if (review) {
+                applyOverviewEvidence(context, review);
                 evidenceRevision = this.reviewEvidenceRevision;
             }
             return this.generateAnnotation(context);
@@ -1952,18 +1958,72 @@ export class ReviewState {
                     item_id: "overview",
                     body: String(body || "").trim(),
                     evidence_ids: [],
+                    basis: evidenceRevision !== null ? "review" : "saved-code",
                     generated_at: new Date().toISOString(),
                 };
                 if (!annotation.body) throw new Error("Copilot returned an empty change summary.");
                 this.annotations.overview = annotation;
+                if (annotation.basis === "saved-code" && this.generateReviewPass) this.refineOverview();
                 this.broadcast("annotation");
-                return annotation;
+                return this.annotations.overview;
             })
             .finally(() => {
                 if (this.annotationPromises.get("overview") === promise) this.annotationPromises.delete("overview");
             });
         this.annotationPromises.set("overview", promise);
         return promise;
+    }
+
+    // Rewrites the change summary once deeper review evidence exists (the repository-rules pass, or a behavior pass when
+    // the repository has no rules). The earlier summary stays visible, marked as being refined, until the new one lands.
+    refineOverview() {
+        if (!this.generateReviewPass || !this.generateAnnotation || !this.model) return null;
+        if (this.annotations.overview) {
+            this.annotations.overview = { ...this.annotations.overview, refining: true };
+            this.broadcast("annotation");
+        }
+        if (this.overviewRefinePromise) {
+            this.overviewRefineAgain = true;
+            return this.overviewRefinePromise;
+        }
+        const generation = this.reviewGeneration;
+        const model = this.model;
+        const current = () => generation === this.reviewGeneration && this.model === model && !this.disposed;
+        this.overviewRefinePromise = (async () => {
+            do {
+                this.overviewRefineAgain = false;
+                if (this.ruleCheck?.status === "running") await this.ruleCheckPromise;
+                if (!current()) return;
+                let review = this.reviewEvidenceModel === model ? this.reviewEvidence : null;
+                if (!review) review = await this.internalReview(OVERVIEW_REVIEW_PROMPT, { scope: "overview" });
+                if (!current()) return;
+                const revision = this.reviewEvidenceRevision;
+                const context = this.overviewContext();
+                applyOverviewEvidence(context, review);
+                const body = String(await this.generateAnnotation(context) || "").trim();
+                if (!current()) return;
+                if (revision !== this.reviewEvidenceRevision) { this.overviewRefineAgain = true; continue; }
+                if (body) {
+                    this.annotations.overview = { id: "annotation:overview", item_id: "overview", body, evidence_ids: [],
+                        basis: "review", refining: this.overviewRefineAgain, generated_at: new Date().toISOString() };
+                    this.saveCurrentReview();
+                    this.broadcast("annotation");
+                }
+            } while (this.overviewRefineAgain && current());
+        })()
+            .catch((error) => {
+                if (!current()) return;
+                if (this.annotations.overview) this.annotations.overview = { ...this.annotations.overview, refine_error: error.message };
+                console.error("[agent-review overview]", error);
+            })
+            .finally(() => {
+                this.overviewRefinePromise = null;
+                if (current() && this.annotations.overview?.refining) {
+                    this.annotations.overview = { ...this.annotations.overview, refining: false };
+                    this.broadcast("annotation");
+                }
+            });
+        return this.overviewRefinePromise;
     }
 
     overviewContext() {

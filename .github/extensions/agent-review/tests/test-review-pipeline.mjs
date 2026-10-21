@@ -469,6 +469,40 @@ test("summaries reuse accumulated review evidence and share one runtime across i
     assert.equal(summary.evidence_limits.completed_files, 150);
 });
 
+test("a quick summary arrives while the deep rules pass runs, then is refined from its evidence", async () => {
+    let releaseReview;
+    const reviewGate = new Promise((resolve) => { releaseReview = resolve; });
+    const summaries = [];
+    const state = new ReviewState("C:\\repo", {
+        generateReviewPass: async (context) => {
+            await reviewGate;
+            const item = context.evidence[0];
+            return response(context, { observations: [{ claim: "The saved implementation changes the delay.",
+                citations: [{ evidence_id: item.id, line: item.lines[0].line }] }] });
+        },
+        generateAnnotation: async (context) => {
+            summaries.push(context);
+            return context.review_evidence ? "## Summary\n\nRefined from review evidence." : "## Summary\n\nQuick summary from saved code.";
+        },
+    });
+    state.model = model(20);
+    state.model.source_files["AGENTS.md"] = { current: "Preserve duration units." };
+    const rules = state.runRuleCheck();
+    const quick = await state.overviewFor();
+    assert.match(quick.body, /Quick summary/, "the first summary does not wait for the deep pass");
+    assert.equal(quick.basis, "saved-code");
+    assert.equal(state.annotations.overview.refining, true);
+    assert.equal(summaries.length, 1);
+    releaseReview();
+    await rules;
+    await state.overviewRefinePromise;
+    assert.match(state.annotations.overview.body, /Refined from review evidence/);
+    assert.equal(state.annotations.overview.basis, "review");
+    assert.equal(state.annotations.overview.refining, false);
+    assert.ok(summaries.at(-1).review_evidence.some((item) => item.claim?.includes("delay")));
+    assert.equal(await state.overviewFor(), state.annotations.overview, "the refined summary is the cached one");
+});
+
 test("approved custom checks use the same full-change pipeline", async () => {
     const directory = await mkdtemp(join(tmpdir(), "large-custom-review-"));
     try {

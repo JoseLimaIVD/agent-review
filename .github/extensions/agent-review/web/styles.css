@@ -1325,6 +1325,9 @@ main { padding: 16px 20px 32px; }
 }
 .brief-generate:hover { background: var(--cp-accent-hover); }
 .brief-ai { margin-top: 6px; }
+.brief-ai-status { margin: 4px 0 0; font-size: 12px; }
+.brief-ai-status.is-refining::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--cp-link); vertical-align: 1px; animation: ai-pulse 1.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .brief-ai-status.is-refining::before { animation: none; } }
 .detail h3 { margin-top: 16px; }
 
 .history-tools {
@@ -1767,6 +1770,11 @@ h3 { font-size: 14px; font-weight: 600; }
 .change-brief .brief-origin { margin-top: 12px; max-height: 180px; overflow: auto; }
 .change-brief .brief-origin.rule-check { max-height: none; overflow: visible; }
 .rule-check .action-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.rule-check .action-row button { min-height: 28px; padding: 3px 12px; border: 1px solid var(--cp-border); border-radius: 6px; background: var(--cp-surface);
+  color: var(--cp-text); font: inherit; font-size: 12px; cursor: pointer; }
+.rule-check .action-row button:hover:not(:disabled) { background: var(--cp-surface-soft); }
+.rule-check .action-row button:focus-visible { outline: 2px solid var(--cp-link); outline-offset: 1px; }
+.rule-check .action-row button:disabled { color: var(--cp-text-muted); cursor: not-allowed; }
 .change-brief .brief-origin > summary { font-size: 12px; color: var(--cp-link); cursor: pointer; }
 .change-brief h3 { margin: 12px 0 6px; font-size: 14px; }
 .change-brief .annotation-body { font-size: 14px; }
@@ -2075,6 +2083,7 @@ body:not(.reviewing):not(.finishing-review) #workspace-freshness, body:not(.revi
 .workspace-group > summary > span { margin-left: 4px; }
 .workspace-folder { padding-left: 10px; font-size: 12px; }
 .workspace-folder > summary { padding: 5px 0; overflow-wrap: anywhere; cursor: pointer; color: var(--cp-text-muted); }
+.workspace-folder-meta { float: right; margin-left: 6px; color: var(--cp-text-muted); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .workspace-file { display: block; width: 100%; margin: 2px 0; padding: 6px 8px; text-align: left; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--cp-text); font-size: 12px; overflow-wrap: anywhere; cursor: pointer; }
 .workspace-file-meta { float: right; display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; }
 .workspace-file-delta { color: var(--cp-text-muted); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }

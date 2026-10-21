@@ -319,6 +319,13 @@ export function treeOrder(tree) {
     return [...[...tree.directories.values()].sort((a, b) => a.name.localeCompare(b.name)).flatMap(treeOrder), ...tree.files];
 }
 
+// Changed files and lines under a folder, including its subfolders.
+export function treeTotals(tree) {
+    const files = treeOrder(tree);
+    return { files: files.length, added: files.reduce((sum, file) => sum + (file.lines_added || 0), 0),
+        removed: files.reduce((sum, file) => sum + (file.lines_removed || 0), 0) };
+}
+
 // The order a reviewer sees in the rail: layers and groups top to bottom; file groups list the changed file, then its
 // consumers and tests; cohort and supporting groups use their rendered folder tree.
 export function reviewSequence(navigation, mode = "groups") {

@@ -12,7 +12,7 @@ import { isReviewSymbol, isTestPath, languageForPath } from "/languages.mjs";
 import { ConnectionFeedback } from "/connection-feedback.mjs";
 import { describeAnalysisWarning, summarizeAnalysisWarnings, unlinkedSentence } from "/analysis-limitations.mjs";
 import { buildReviewPlan, concernPriorities } from "/review-plan.mjs";
-import { fileTree, groupForSource, reviewSequence, workspaceNavigation } from "/review-workspace.mjs";
+import { fileTree, groupForSource, reviewSequence, treeTotals, workspaceNavigation } from "/review-workspace.mjs";
 import { countLabel, plural } from "/count-format.mjs";
 import {
     REVIEW_DISPOSITIONS, concernTriage, effectiveDisposition, fileReviewId, fileReviewProgress, isConcernSetAside, isReviewComplete, nextFileReview, parseReviewLedger, reviewProgress,
@@ -360,7 +360,13 @@ function renderWorkspaceNavigation() {
             for (const directory of [...tree.directories.values()].sort((a, b) => a.name.localeCompare(b.name))) {
                 const details = el("details", "workspace-folder");
                 details.dataset.prefix = directory.path;
-                details.append(el("summary", "", directory.name));
+                // A collapsed folder still says how much changed inside it.
+                const totals = treeTotals(directory);
+                const summary = el("summary", "", directory.name);
+                const meta = el("span", "workspace-folder-meta", `${countLabel(totals.files, "file")} · +${totals.added.toLocaleString()} −${totals.removed.toLocaleString()}`);
+                summary.title = `${directory.path}: ${countLabel(totals.files, "changed file")}, ${totals.added.toLocaleString()} added and ${totals.removed.toLocaleString()} removed lines`;
+                summary.prepend(meta);
+                details.append(summary);
                 appendTree(details, directory, owner);
                 if (query) details.open = true;
                 container.append(details);
@@ -571,7 +577,8 @@ async function openWorkspaceFile(file, group = null) {
     const node = range?.symbol_id && state.payload.model.nodes.find((node) => node.id === range.symbol_id);
     try {
         if (node) await selectItem(node, false);
-        else await selectFile(file, false);
+        // Generated bundles are not sent to Copilot; every other file gets its explanation.
+        else await selectFile(file, !file.generated);
     } finally {
         if (state.pendingSource === pending) {
             state.pendingSource = null;
@@ -3022,6 +3029,15 @@ function renderChangeBrief() {
     heading.append(el("h3", "", "Copilot change summary"));
     if (annotation?.body) heading.append(copyButton(annotation.body, "Copy summary"));
     panel.append(heading);
+    if (annotation?.body && (annotation.refining || annotation.basis || annotation.refine_error)) {
+        const status = el("p", `muted brief-ai-status${annotation.refining ? " is-refining" : ""}`,
+            annotation.refining ? "Quick summary from the saved code. Copilot is refining it with a deeper review of the change; it updates here when ready."
+                : annotation.refine_error ? `Quick summary from the saved code. Refining it with a deeper review failed: ${annotation.refine_error}`
+                : annotation.basis === "review" ? "Written from a deeper review of the change (the repository-rules and behavior pass)."
+                : "Written from the saved code.");
+        status.setAttribute("role", "status");
+        panel.append(status);
+    }
     if (annotation?.body) {
         const body = revealOnce(el("div", "annotation-body brief-ai"), "overview");
         markdownContext.intent = state.briefIntent || null;
