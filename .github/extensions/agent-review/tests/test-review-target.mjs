@@ -76,7 +76,7 @@ test("PR resolves GitHub metadata and merge base without checkout", async () => 
 
     assert.equal(target.baseRef, merge);
     assert.equal(target.currentRef, head);
-    assert.equal(calls.filter(([command]) => command === "git").length, 3);
+    assert.equal(calls.filter(([command, args]) => command === "git" && !args.includes("remote")).length, 3);
     assert.deepEqual([target.intent.kind, target.intent.body, target.intent.author], ["pr", "Adds the strict fallback.", "octo"]);
     assert.deepEqual(target.intent.commits.map((commit) => [commit.subject, commit.body]), [["Add fallback", "Validate year."], ["Fix tests", ""]]);
     assert.ok(calls.some(([, args]) => args.includes(`${merge}..${head}`)), "PR commit messages cover only the PR range");
@@ -120,6 +120,7 @@ test("commit list refresh fetches remotes before listing all branch histories", 
     test("PR list is repository scoped and includes open, closed and merged PRs", async () => {
         const calls = [];
         const result = await listReviewTargets("C:\\repo", { mode: "pr", page: 1 }, async (command, args) => {
+            if (command === "git") return { stdout: "" };
             calls.push(args);
             assert.equal(command, "gh");
             return { stdout: args[0] === "repo" ? JSON.stringify({ nameWithOwner: "example/repo" })
@@ -136,7 +137,7 @@ test("commit list refresh fetches remotes before listing all branch histories", 
         assert.equal(result.has_more, false);
         await assert.rejects(listReviewTargets("C:\\repo", { mode: "pr" }, async () => { throw new Error("Authentication required"); }), /Authentication required/);
         const empty = await listReviewTargets("C:\\repo", { mode: "pr" }, async (_, args) => ({
-            stdout: args[0] === "repo" ? '{"nameWithOwner":"example/repo"}' : "[]",
+            stdout: args.includes("remote") ? "" : args[0] === "repo" ? '{"nameWithOwner":"example/repo"}' : "[]",
         }));
         assert.deepEqual(empty.items, []);
     });

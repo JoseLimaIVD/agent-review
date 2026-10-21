@@ -13,7 +13,7 @@ import { assessCratePackageRisk } from "./crate-package-risk.mjs";
 import { buildPackageUsageContext } from "./package-context.mjs";
 import { CustomPromptStore } from "./custom-prompts.mjs";
 import { customAnalysisContext, validateCustomAnalysis } from "./custom-analysis.mjs";
-import { resolveReviewTarget } from "./review-target.mjs";
+import { listReviewTargets, resolveReviewTarget } from "./review-target.mjs";
 import { buildSessionContext, findSessionAttribution, mergeSessionContexts } from "./session-context.mjs";
 import { spawnOwnedAnalyzer } from "./ownership-guard.mjs";
 import { fingerprintWorktree } from "./worktree-changes.mjs";
@@ -44,7 +44,7 @@ import { contextForSection, sectionsFor } from "./review-sections-context.mjs";
 import { annotationCodeContext } from "./annotation-context.mjs";
 import { ReviewProgressStore, validateReviewCursor, validateReviewEntries } from "./review-progress.mjs";
 import { reviewSnapshotKey } from "./web/review-ledger.mjs";
-import { createReviewHandoff, submitGitHubHandoff, validateHandoffImport } from "./review-handoff.mjs";
+import { createReviewHandoff, submitGitHubHandoff, supportsGitHubHandoff, validateHandoffImport } from "./review-handoff.mjs";
 
 const execFileAsync = promisify(execFile);
 const extensionRoot = dirname(fileURLToPath(import.meta.url));
@@ -292,6 +292,8 @@ export class ReviewState {
         this.worktreeMonitorOwners = 0;
         this.workspacePath = options.workspacePath;
         this.reviewProgressStore = new ReviewProgressStore(this.workspacePath);
+        this.adoClient = options.adoClient;
+        this.runTargetCommand = options.runTargetCommand;
         this.submitHandoffReview = options.submitHandoffReview || submitGitHubHandoff;
         this.handoffPreview = null;
         this.generatedObservations = [];
@@ -402,10 +404,12 @@ export class ReviewState {
         this.handoffPreview = { token, model, target, revision: progress.revision, snapshot: progress.snapshot,
             body: result.markdown, created: Date.now(), consumed: false };
         return { ...result, token, revision: progress.revision,
-            provider: this.handoffSubmitting ? { available: false, pending: true, url: target.url, commit: model.metadata.head_sha,
+            provider: target.provider === "ado" ? { available: false,
+                reason: "Azure DevOps review is read-only; publishing is unavailable. Export Markdown or review-state JSON locally instead." }
+                : this.handoffSubmitting ? { available: false, pending: true, url: target.url, commit: model.metadata.head_sha,
                 reason: "Awaiting the previous submission receipt. Local export is available; do not submit again." }
                 : result.markdown.length > 60_000 ? { available: false, reason: "This summary exceeds the bounded PR review size. Export locally instead; nothing will be submitted." }
-                : target.mode === "pr" && Boolean(target.url) ? { available: true, url: target.url, commit: model.metadata.head_sha }
+                : supportsGitHubHandoff(target) ? { available: true, url: target.url, commit: model.metadata.head_sha }
                 : { available: false, reason: "Provider submission requires a loaded GitHub PR target. Local and commit reviews can export without creating a PR." } };
     }
 
@@ -439,11 +443,14 @@ export class ReviewState {
         if (confirm !== true || !preview || token !== preview.token || preview.consumed || this.handoffSubmitting || Date.now() - preview.created > 15 * 60_000) {
             throw new Error("A fresh preview and explicit confirmation are required; nothing was submitted.");
         }
-        if (this.loading || this.model !== preview.model || this.reviewTarget !== preview.target || preview.target.mode !== "pr") {
+        if (!supportsGitHubHandoff(preview.target)) {
+            throw new Error("Provider publishing is unavailable for this target. Azure DevOps review is read-only; export locally instead.");
+        }
+        if (this.loading || this.switchingRepository || this.switchingTarget || this.model !== preview.model || this.reviewTarget !== preview.target || preview.target.mode !== "pr") {
             throw new Error("The review target changed or is not a PR; nothing was submitted.");
         }
         const progress = await this.progressForReview();
-        if (preview.consumed || this.handoffSubmitting || this.loading || this.model !== preview.model || this.reviewTarget !== preview.target
+        if (preview.consumed || this.handoffSubmitting || this.switchingRepository || this.switchingTarget || this.loading || this.model !== preview.model || this.reviewTarget !== preview.target
             || progress.snapshot !== preview.snapshot || progress.revision !== preview.revision) {
             throw new Error("Review decisions changed. Prepare a new preview before submitting.");
         }
@@ -814,13 +821,13 @@ export class ReviewState {
     }
 
     async setReviewTarget(input) {
-        if (this.refreshPromise || this.switchingTarget) throw new Error("Wait for the current analysis or review switch to finish.");
+        if (this.refreshPromise || this.switchingTarget || this.switchingRepository || this.handoffSubmitting) throw new Error("Wait for the current analysis, repository switch, or submission to finish.");
         if (this.packageRiskPromises.size || this.packageAssessmentPromises.size) {
             throw new Error("Wait for the current package assessment to finish before switching reviews.");
         }
         this.switchingTarget = true;
         try {
-            const resolved = await resolveReviewTarget(this.repoRoot, input);
+            const resolved = await resolveReviewTarget(this.repoRoot, input, this.runTargetCommand, { adoClient: this.adoClient });
             this.stopInternalReviews();
             this.saveCurrentReview();
             this.reviewTarget = resolved;
@@ -872,7 +879,12 @@ export class ReviewState {
 
     reviewCacheKey(target = this.reviewTarget) {
         return JSON.stringify([target.mode, target.currentRef || null,
-            target.mode === "worktree" ? this.worktreeBaseRef : target.baseRef]);
+            target.mode === "worktree" ? this.worktreeBaseRef : target.baseRef,
+            ...(target.mode === "pr" ? [target.provider || "github", target.url || target.ref] : [])]);
+    }
+
+    listReviewTargets(input) {
+        return listReviewTargets(this.repoRoot, input, this.runTargetCommand, { adoClient: this.adoClient });
     }
 
     saveCurrentReview() {

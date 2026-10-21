@@ -5,6 +5,9 @@ import { fileReviewId, fileReviewProgress, parseReviewLedger } from "./web/revie
 import { groupFindings } from "./web/findings.mjs";
 
 const text = (value) => String(value ?? "").replace(/[\\`*_{}[\]()#+!|<>]/g, "\\$&").replace(/\r?\n/g, " ");
+const githubPrPattern = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/([1-9]\d*)$/;
+export const supportsGitHubHandoff = (target) => target.mode === "pr"
+    && (!target.provider || target.provider === "github") && githubPrPattern.test(target.url || "");
 const code = (value) => {
     const content = String(value ?? "").replace(/[\r\n]/g, " ");
     const width = Math.max(0, ...[...content.matchAll(/`+/g)].map((match) => match[0].length)) + 1;
@@ -42,6 +45,11 @@ export function createReviewHandoff(model, target, progress, { testRun, warnings
         `${counts.reviewed}/${counts.total} changed files marked reviewed; ${counts.pending} not reviewed; ${counts.followUp} need follow-up.`,
         "Human decisions do not prove correctness, resolve findings, complete AI analysis, or establish test coverage.", "",
         "## File decisions and follow-ups"];
+    if (target.provider === "ado") {
+        lines.splice(4, 0, `Azure DevOps PR: ${text(target.url)}`,
+            `Iteration: ${target.iteration} · Target branch: ${code(target.targetBranch)} · Target commit: ${code(target.targetRef)}`,
+            "Azure DevOps review is read-only. Export this handoff locally; publishing is unavailable.");
+    }
     lines.push(`Exported: ${artifact.exported_at} · Saved decision revision: ${progress.revision ?? 0}`);
     const ranked = files.filter((file) => {
         const entry = entries.get(fileReviewId(file.path));
@@ -164,7 +172,7 @@ export function runGitHub(args, input, cwd) {
 }
 
 export async function submitGitHubHandoff({ url, commit, body, cwd }, run = runGitHub) {
-    const match = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/([1-9]\d*)$/.exec(url || "");
+    const match = githubPrPattern.exec(url || "");
     if (!match || !/^[a-f0-9]{40,64}$/i.test(commit || "") || typeof body !== "string" || !body.trim() || body.length > 60_000) {
         throw new Error("A valid PR, immutable commit and bounded review body are required.");
     }
