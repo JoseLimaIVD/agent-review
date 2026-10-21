@@ -1616,7 +1616,8 @@ function renderSourcePosition(path) {
 }
 
 // The file "Mark … & next" will open, so the button can name its target.
-function nextFileLabel() {
+// The next reading-path entry after the open file, assuming the open file is marked as decided.
+function nextReviewEntry() {
     const source = state.source;
     if (!source) return null;
     const disposition = elements.file_review_disposition.value === "pending" ? "reviewed" : elements.file_review_disposition.value;
@@ -1624,7 +1625,74 @@ function nextFileLabel() {
     entries.set(fileReviewId(source.path), { disposition, path: source.path });
     const next = nextFileReview(fileReviewQueue(), entries,
         { path: source.path, group: state.navigationMode === "files" ? null : state.activeReviewGroup || null });
-    return next && next.path !== source.path ? next.path : null;
+    return next && next.path !== source.path ? next : null;
+}
+
+function nextFileLabel() {
+    return nextReviewEntry()?.path || null;
+}
+
+// Which explanation Agent Review shows when a reading-path entry opens: its first changed symbol, a priority's callable
+// or finding, or else the whole file. Mirrors openFileReview and openWorkspaceFile.
+function annotationIdForEntry(entry) {
+    const model = state.payload?.model;
+    // Which item opens depends on the reading-path groups; guessing before they load would prefetch the wrong one.
+    if (!model || !entry?.path || !state.sectionData) return null;
+    const file = entry.file || model.changes.find((change) => change.path === entry.path);
+    if (!file || file.generated) return null;
+    // Resuming a saved reading point reopens the exact item that was selected.
+    if (entry.resume) {
+        const id = entry.resume.item_id;
+        const known = id && [...model.nodes, ...(model.attention || [])].some((item) => item.id === id && (!item.path || item.path === entry.path));
+        return known ? id : `file:${entry.path}`;
+    }
+    const navigation = workspaceNavigation(model, state.sectionData);
+    const group = navigation.groups.find((item) => item.id === entry.group)
+        || navigation.groups.find((item) => item.files.some((candidate) => candidate.path === entry.path));
+    if (!group?.section) {
+        const priority = overviewPlan().find((item) => item.path === entry.path);
+        if (priority) return priority.kind === "package" ? null
+            : priority.kind === "callable" && priority.preferred ? priority.callable.id : (priority.finding || priority.node)?.id || null;
+    }
+    const range = group?.section?.ranges.find((item) => item.path === entry.path && item.side !== "base")
+        || group?.section?.ranges.find((item) => item.path === entry.path);
+    const node = range?.symbol_id && model.nodes.find((item) => item.id === range.symbol_id);
+    return node ? node.id : `file:${entry.path}`;
+}
+
+// Copilot starts explaining the next item while the reader is still on this one, so opening it shows the explanation
+// immediately. The server shares one generation per item, so a click on a prefetched item joins it rather than repeating it.
+function prefetchAnnotation(entry) {
+    const id = annotationIdForEntry(entry);
+    const payload = state.payload;
+    if (!id || payload?.annotations?.[id] || payload?.loading) return;
+    state.prefetchedAnnotations ||= new Set();
+    const key = `${payload.review_generation}:${id}`;
+    if (state.prefetchedAnnotations.has(key)) return;
+    state.prefetchedAnnotations.add(key);
+    api("/api/annotation", { method: "POST", body: JSON.stringify({ id, evidence_ids: [] }) })
+        .then(({ annotation }) => {
+            if (state.payload !== payload && state.payload?.review_generation !== payload.review_generation) return;
+            state.payload.annotations ||= {};
+            state.payload.annotations[id] = annotation;
+            if (state.selected?.id === id) renderAnnotation(state.selected, annotation);
+        })
+        // Unavailable or failed prefetches are not retried; opening the item still requests it and shows any error.
+        .catch(() => {});
+}
+
+// Prefetch the next item shortly after a file settles, so the open file's own explanation goes first and skimming
+// through files quickly does not start a generation for each one.
+function schedulePrefetchNext() {
+    clearTimeout(state.prefetchTimer);
+    const path = state.source?.path;
+    if (!path || state.reviewPage !== "review") return;
+    state.prefetchTimer = setTimeout(() => {
+        if (state.source?.path !== path || state.reviewPage !== "review") return;
+        // Still opening: check again once the file has settled.
+        if (state.pendingSource) { schedulePrefetchNext(); return; }
+        prefetchAnnotation(nextReviewEntry());
+    }, 1200);
 }
 
 function renderFileReview() {
@@ -2802,6 +2870,11 @@ function renderReviewOverview() {
     elements.overview_title.textContent = target?.intent?.subject || target?.intent?.title
         || (target?.mode === "worktree" ? "Review your uncommitted changes" : target?.label || "Review this change");
     const overviewBody = payload.annotations?.overview?.body;
+    // Once the summary is on screen, Copilot starts on the first item the reader will open.
+    if (overviewBody && state.reviewPage === "overview" && state.progressReady) {
+        const destination = overviewDestination();
+        if (destination) prefetchAnnotation(destination.resume ? destination : destination.entry || destination);
+    }
     const blurb = overviewBlurb(overviewBody);
     const fullBlurb = overviewBlurb(overviewBody, { full: true });
     elements.overview_description.replaceChildren();
@@ -4597,6 +4670,7 @@ async function renderSource({ preserveScroll = false } = {}) {
     document.querySelectorAll(".tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.tab === state.sourceTab));
     renderSourceNavigation();
     renderFileReview();
+    schedulePrefetchNext();
     if (preserveScroll) {
         elements.source.scrollTop = previousScroll.top;
         elements.source.scrollLeft = previousScroll.left;
