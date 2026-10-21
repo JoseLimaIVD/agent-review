@@ -5,6 +5,43 @@ import { ReviewState } from "../review-state.mjs";
 import { buildAnnotationPrompt } from "../ai-prompts.mjs";
 import { managedCopilotPath } from "../managed-copilot.mjs";
 
+test("annotation prefetch and foreground callers share a generation, persist its result, and retry failures", async () => {
+    let calls = 0, finish, started;
+    let ready = new Promise((resolve) => { started = resolve; });
+    const state = new ReviewState("C:\\repo", {
+        generateAnnotation: () => {
+            calls++;
+            started();
+            return new Promise((resolve, reject) => { finish = { resolve, reject }; });
+        },
+    });
+    state.model = { metadata: {}, summary: {}, warnings: [], coverage: {}, nodes: [], edges: [], evidence: {},
+        changes: [{ path: "a.js", status: "modified", lines_added: 1, lines_removed: 1 }],
+        source_files: { "a.js": { base: "export const value = 1;\n", current: "export const value = 2;\n" } } };
+    const prefetch = state.annotationFor("file:a.js");
+    const foreground = state.annotationFor("file:a.js");
+    await ready;
+    assert.equal(calls, 1);
+    finish.resolve("## What changed\n\nThe saved value is two.");
+    const annotation = await prefetch;
+    assert.equal(await foreground, annotation);
+    assert.equal(await state.annotationFor("file:a.js"), annotation);
+    assert.equal(calls, 1, "completed prefetch remains cached");
+    delete state.annotations["file:a.js"];
+    ready = new Promise((resolve) => { started = resolve; });
+    const failed = state.annotationFor("file:a.js");
+    await ready;
+    finish.reject(new Error("Provider unavailable"));
+    await assert.rejects(failed, /Provider unavailable/);
+    assert.equal(state.annotationPromises.size, 0, "failure releases the shared request");
+    ready = new Promise((resolve) => { started = resolve; });
+    const retry = state.annotationFor("file:a.js");
+    await ready;
+    finish.resolve("## What changed\n\nThe retried explanation.");
+    await retry;
+    assert.equal(calls, 3);
+});
+
 test("missing managed CLI reports a history error without discarding analysis or current context", async () => {
     const state = new ReviewState("C:\\repo", {
         currentSessionId: "current-session",

@@ -63,6 +63,20 @@ the saved call and import relationships between them, with "builds on" links.
 Each layer carries one short, AI-labelled sentence describing what the change
 does there, generated once from that layer's saved diffs; until it arrives (or
 when Copilot is unavailable) the layer lists its changed symbols instead.
+Animated line bars identify pending AI work, including layer summaries,
+overview refinement, explanations, background review and discussion answers;
+reduced-motion preferences keep the bars static. Layer headers expand or
+collapse their file lists; **Review layer** opens the next unreviewed file.
+Indented, bordered file buttons open a diff, with the current file clearly
+highlighted. The first explanation is prefetched after the overview settles,
+then the next one while reading. Opening an in-flight prefetch joins the same
+request; failures are shown and opening that file retries the explanation.
+To check these interactions against a real changed repository, set
+`AGENT_REVIEW_UX_REPO` and run
+`node .github\extensions\agent-review\tests\browser\review-prefetch.mjs`
+with the browser-tooling settings described below. It uses the production
+analyzer and server with controlled AI responses; it does not change that
+repository or call a model.
 Within a layer each changed file appears exactly once, with its consumers and
 tests listed beneath it and tagged by role (consumer, test, import-linked, or
 name-matched test); identical implementations across many files stay one
@@ -82,7 +96,8 @@ never prove a particular path ran. When a supplied coverage run measured the
 open file, the current-side gutter marks each executed and not-executed line and
 item discussion receives those exact line ranges. **Ask about this** is available beside the
 reading-pane controls, and the context/discussion switch stays visible while
-reading. Optional originating-session context is disclosed separately; errors
+reading. Originating-session context (the Copilot request that produced the code)
+sits directly beneath the AI explanation and its risk assessment; errors
 remain explicit. **Focus code** also hides the decision footer while reading.
 
 Whole-file review decisions have a clear finish line: **Not reviewed**,
@@ -109,16 +124,29 @@ different content or conflicting existing decisions is rejected, not replaced
 with newer worktree source. Binary/unsnapshotted worktree content cannot be
 verified for portable import and is explicitly unsupported.
 
-For a loaded GitHub PR, the same preview supports an explicitly selected,
-confirmed **comment-only** review through the existing `gh` CLI authorization.
-It never approves or requests changes. The original commit is pinned and the PR
-head is rechecked before posting; changed targets/decisions, stale previews and
-duplicate submissions are rejected. A network failure may leave the remote
-outcome unknown: check the PR before preparing another submission. Local and
-commit reviews remain fully usable without creating a PR.
+**Line comments.** Click a changed line's number, press **C**, or use **Comment**
+to draft a comment under that line (Ctrl+Enter saves, Esc cancels). Several
+drafts can be open at once and typed text is never discarded implicitly. Drafts
+are saved in the session workspace per snapshot and are revision-checked across
+tabs. On a commit or worktree review they are included in the handoff Markdown.
+
+For a loaded GitHub PR, existing review threads appear under their lines (threads
+on other commits are grouped separately), marking a file reviewed toggles
+GitHub's per-file **Viewed** checkbox, and the same preview submits one review
+through the existing `gh` CLI authorization: the reviewer's optional summary,
+the Agent Review summary and the drafted line comments, as an explicitly chosen
+**Comment**, **Approve** or **Request changes** verdict (GitHub forbids the last
+two on your own PR). Only lines inside GitHub's own PR diff can take comments.
+The original commit is pinned and the PR head is rechecked: once the PR has newer
+commits, commenting, Viewed sync and submission pause until the PR is reopened.
+Changed targets/decisions/drafts, stale previews and duplicate submissions are
+rejected. A network failure may leave the remote outcome unknown: check the PR
+before preparing another submission. Local and commit reviews remain fully
+usable without creating a PR.
 
 Azure DevOps PR review is **read-only**. Handoff preview explicitly disables
 publishing; Markdown and review-state JSON exports remain available locally.
+Drafted line comments stay local and are included in the exported summary.
 It never posts comments, changes reviewer votes, or changes PR status.
 
 A change brief shows file mix, source/test churn, coverage availability, and the
@@ -127,11 +155,27 @@ to explain behavior changes, suggest a review order, and distinguish demonstrate
 cases from evidence gaps. Clickable metrics include all reviewable files, not
 just analyzed source languages.
 
+Generated or minified files (built bundles, `*.min.*`, source maps, and JS/CSS
+whose lines are machine-length) remain reviewable as files but are not parsed
+for symbols, sit under **Supporting files** instead of leading the reading path,
+and unchanged ones are not copied into the review. A repository that commits its
+build output therefore stays within the analyzer's bounded model size.
+
 The default **Review plan** ranks changed callables and dependencies by rule-based
 impact, churn, caller reach, and the strongest available test evidence. It updates
 after linked tests run and opens the highest-risk unreviewed or follow-up path
 directly in source. The architecture graph remains available for exploratory
 drill-down.
+
+**Verify a layer.** Beside the code, *What was verified?* offers to run just the
+current layer's linked tests (an explicit action that executes repository code,
+in the worktree or a disposable snapshot export). Results from successive layers
+accumulate for the snapshot: the rail and Finish show each layer's outcome, and
+where the language supports per-test line tracing, gutter dots mark the changed
+code paths a linked test executed, reached only through failing tests, or never
+reached. Cancelling or a failed layer run keeps the earlier evidence. Because a
+layer is usually one language, this also verifies mixed-language reviews layer
+by layer. The handoff lists each layer's linked-test outcome and every run.
 
 ### Follow architecture and impact
 
@@ -962,7 +1006,8 @@ export. Runs are cancellable and report per-test outcomes. Cargo may download
 dependencies, compile and execute build scripts/procedural macros, build code,
 and execute repository tests; snapshot isolation is **not a sandbox**. Cargo
 outcomes do not provide per-path tracing, so inferred paths are not upgraded to
-Confirmed. Mixed-language combined execution remains unsupported.
+Confirmed. Mixed-language combined execution remains unsupported; verify such
+reviews one layer at a time.
 
 ### Node.js and TypeScript reviews
 

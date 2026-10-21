@@ -161,7 +161,9 @@ test("linked test runs are explicit, worktree-only, cancellable, stale-aware, an
     await second;
     state.cancelTestRun();
     assert.equal(signal.aborted, true);
-    assert.equal(state.testRun.status, "cancelled");
+    assert.equal(state.testRun.status, "complete", "cancelling keeps the results the earlier run established");
+    assert.deepEqual(state.testRun.counts, { passed: 1, failed: 1, error: 0, skipped: 0 });
+    assert.deepEqual(state.testRun.history.map((run) => run.status), ["complete", "cancelled"]);
     await state.refresh();
     assert.equal(state.testRun, null, "reanalysis clears runs for the previous snapshot");
     await state.dispose();

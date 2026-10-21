@@ -35,6 +35,29 @@ class SnapshotTests(unittest.TestCase):
         self.assertIn("+++ new value\n", source["diff"])
         self.assertIn("--- a/large.js\n+++ b/large.js\n", source["diff"])
 
+    def test_generated_bundles_stay_files_but_unchanged_text_is_sent_once_or_omitted(self) -> None:
+        from generated_sources import generated_paths, is_generated_source
+        bundle = b"!function(){" + b"var a=1;" * 1000 + b"}();\n"
+        self.assertTrue(is_generated_source("static/assets/index-CO33IrX7.js", bundle), "a 8 KB single-line bundle")
+        self.assertTrue(is_generated_source("assets/core-D8n9Wfto.js", b"import{a as e}from'./x.js';" + b"e(1);" * 300),
+                        "a small one-line chunk is still minified output")
+        self.assertTrue(is_generated_source("vendor/lib.min.js", b"x\n"))
+        self.assertTrue(is_generated_source("app.js.map", b"{}"))
+        self.assertFalse(is_generated_source("src/app.js", b"export function run() {\n  return 1;\n}\n"))
+        self.assertFalse(is_generated_source("src/big.py", b"x = '" + b"a" * 9000 + b"'\n"), "only bundle languages")
+        snapshot = Snapshot(Path("unused"), "base", {
+            "src/app.ts": b"export const a = 1;\n", "assets/old-1a2b3c4d.js": bundle, "assets/kept-9z8y7x6w.js": bundle,
+        }, {
+            "src/app.ts": b"export const a = 1;\n", "assets/new-5e6f7g8h.js": bundle, "assets/kept-9z8y7x6w.js": bundle,
+        })
+        generated = generated_paths(snapshot.baseline, snapshot.current)
+        self.assertEqual({"assets/old-1a2b3c4d.js", "assets/new-5e6f7g8h.js", "assets/kept-9z8y7x6w.js"}, generated)
+        sources = snapshot.source_files(snapshot.changes(), generated)
+        self.assertEqual({"generated": True, "omitted": True}, sources["assets/kept-9z8y7x6w.js"], "unchanged bundles carry no text")
+        self.assertTrue(sources["assets/new-5e6f7g8h.js"]["generated"])
+        self.assertIn("var a=1;", sources["assets/new-5e6f7g8h.js"]["current"], "a changed bundle stays reviewable")
+        self.assertEqual({"current", "diff", "baseline_same"}, set(sources["src/app.ts"]), "unchanged text is not duplicated")
+
     def test_node_saved_sources_retain_both_trees_without_changing_python_only_shape(self) -> None:
         snapshot = Snapshot(Path("unused"), "base", {
             "main.ts": b"export function run() { return 1; }\n",

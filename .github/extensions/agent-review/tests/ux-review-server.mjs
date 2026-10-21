@@ -42,8 +42,15 @@ const state = new ReviewState(repo, { baseRef: "HEAD", readWorktreeFingerprint: 
 if (process.env.AGENT_REVIEW_UX_MODEL) {
     state.model = JSON.parse(await readFile(process.env.AGENT_REVIEW_UX_MODEL, "utf8"));
     const worktree = state.model.metadata.head_sha === state.model.metadata.base_sha;
-    state.reviewTarget = { ...await resolveReviewTarget(repo, { mode: worktree ? "worktree" : "commit", ref: state.model.metadata.head_sha }),
+    // A saved model can be paired with an explicit target, e.g. {"mode":"pr","ref":"1"}, to review a pull request.
+    const requested = process.env.AGENT_REVIEW_UX_TARGET ? JSON.parse(process.env.AGENT_REVIEW_UX_TARGET) : null;
+    state.reviewTarget = { ...await resolveReviewTarget(repo, requested || { mode: worktree ? "worktree" : "commit", ref: state.model.metadata.head_sha }),
         baseRef: state.model.metadata.base_sha };
+    // The product extracts code paths and test links after analysis; a saved model needs the same step.
+    state.startDecisionMap();
+} else if (process.env.AGENT_REVIEW_UX_TARGET) {
+    // Open a specific target (for example {"mode":"pr","ref":"1"}) instead of the worktree.
+    await state.setReviewTarget(JSON.parse(process.env.AGENT_REVIEW_UX_TARGET));
 } else await state.refresh();
 if (process.env.AGENT_REVIEW_UX_ANNOTATIONS) {
     const cached = JSON.parse(await readFile(process.env.AGENT_REVIEW_UX_ANNOTATIONS, "utf8"));

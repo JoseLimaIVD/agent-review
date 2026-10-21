@@ -17,7 +17,7 @@ import { listReviewTargets, resolveReviewTarget } from "./review-target.mjs";
 import { buildSessionContext, findSessionAttribution, mergeSessionContexts } from "./session-context.mjs";
 import { spawnOwnedAnalyzer } from "./ownership-guard.mjs";
 import { fingerprintWorktree } from "./worktree-changes.mjs";
-import { callablesForSubject, decisionPromptContext } from "./web/decision-map.mjs";
+import { callablesForSubject, decisionPromptContext, mergeTestRuns, scopeDecisionMap } from "./web/decision-map.mjs";
 import { exportSnapshot, mapExecutedPaths } from "./test-run.mjs";
 import { repositoryRuleSources, RULES_PROMPT, RULE_EVIDENCE_OPTIONS, ruleCheckContext } from "./review-contracts.mjs";
 import { buildCodePathRequests, mergeCodePathMaps, reviewAdapter, sourceAdapter, testAdapterForMap } from "./language-adapters.mjs";
@@ -29,6 +29,8 @@ import { answerDiscussion } from "./item-discussion.mjs";
 import { layerSummaryContext } from "./layer-summaries.mjs";
 import { workspaceNavigation } from "./web/review-workspace.mjs";
 import { ExplanationValidationError } from "./ai-response.mjs";
+import { groupFindings } from "./web/findings.mjs";
+import { buildReviewPlan, concernPriorities } from "./web/review-plan.mjs";
 import { ANNOTATION_PROMPT_VERSION } from "./ai-prompts.mjs";
 
 // Item explanations written by an older prompt are dropped so the next view regenerates them; the change overview and
@@ -38,13 +40,16 @@ export function currentAnnotations(annotations) {
     for (const [key, annotation] of Object.entries(annotations || {})) {
         if (key === "overview" || key === "layers" || annotation?.prompt_version === ANNOTATION_PROMPT_VERSION) kept[key] = annotation;
     }
+    // A summary saved while it was being refined is shown as it was; the refinement itself did not survive the restart.
+    if (kept.overview?.refining) kept.overview = { ...kept.overview, refining: false };
     return kept;
 }
 import { contextForSection, sectionsFor } from "./review-sections-context.mjs";
 import { annotationCodeContext } from "./annotation-context.mjs";
 import { ReviewProgressStore, validateReviewCursor, validateReviewEntries } from "./review-progress.mjs";
 import { reviewSnapshotKey } from "./web/review-ledger.mjs";
-import { createReviewHandoff, submitGitHubHandoff, supportsGitHubHandoff, validateHandoffImport } from "./review-handoff.mjs";
+import { createReviewHandoff, runGitHub, supportsGitHubHandoff, validateHandoffImport } from "./review-handoff.mjs";
+import { pullRequestCommentableLines, pullRequestState, pullRequestThreads, ReviewDraftStore, setFileViewed, submitPullRequestReview, validateDraftComment } from "./pr-review.mjs";
 
 const execFileAsync = promisify(execFile);
 const extensionRoot = dirname(fileURLToPath(import.meta.url));
@@ -128,6 +133,26 @@ export async function loadReviewConfig(repoRoot) {
     }
 }
 
+const OVERVIEW_REVIEW_PROMPT = "Explain observable before/after behavior across this change. Collect concrete correctness risks and test evidence. Investigate cross-file contracts, defaults and units.";
+
+// Review evidence replaces raw code excerpts in the summary context: confirmed concerns first, within a fixed budget.
+function applyOverviewEvidence(context, review) {
+    let remaining = 28_000;
+    const evidence = [];
+    for (const item of [...review.findings, ...review.observations]) {
+        const characters = JSON.stringify(item).length;
+        if (characters > remaining) continue;
+        evidence.push(item);
+        remaining -= characters;
+    }
+    context.code_context = [];
+    context.review_evidence = evidence;
+    context.evidence_limits = { ...review.coverage, status: review.status,
+        omitted_records: review.findings.length + review.observations.length - evidence.length,
+        gaps: review.gaps.slice(0, 10), omitted_gaps: Math.max(0, review.gaps.length - 10) };
+    return context;
+}
+
 export function runAnalyzerProcess(executable, args, onProgress = () => {}, options = {}) {
     return new Promise((resolve, reject) => {
         options.signal?.throwIfAborted();
@@ -179,12 +204,23 @@ export function runAnalyzerProcess(executable, args, onProgress = () => {}, opti
                 return;
             }
             try {
-                resolve(JSON.parse(Buffer.concat(stdout).toString("utf8")));
+                resolve(restoreSharedBaselines(JSON.parse(Buffer.concat(stdout).toString("utf8"))));
             } catch (error) {
                 reject(new Error(`Analyzer returned invalid JSON: ${error.message}`));
             }
         });
     });
+}
+
+// The analyzer sends an unchanged file's text once (`baseline_same`); every consumer expects both sides.
+export function restoreSharedBaselines(model) {
+    for (const saved of Object.values(model?.source_files || {})) {
+        if (saved?.baseline_same) {
+            saved.baseline = saved.current;
+            delete saved.baseline_same;
+        }
+    }
+    return model;
 }
 
 export async function runAnalyzer(repoRoot, baseRef, onProgress, currentRef = null, options = {}) {
@@ -294,7 +330,11 @@ export class ReviewState {
         this.reviewProgressStore = new ReviewProgressStore(this.workspacePath);
         this.adoClient = options.adoClient;
         this.runTargetCommand = options.runTargetCommand;
-        this.submitHandoffReview = options.submitHandoffReview || submitGitHubHandoff;
+        this.reviewDraftStore = new ReviewDraftStore(this.workspacePath);
+        this.github = options.github || runGitHub;
+        this.submitHandoffReview = options.submitHandoffReview
+            || ((input) => submitPullRequestReview(input, input.cwd, this.github));
+        this.prStateCache = null;
         this.handoffPreview = null;
         this.generatedObservations = [];
         this.selection = null;
@@ -379,7 +419,126 @@ export class ReviewState {
 
     async saveReviewProgress(input) {
         const location = await this.validateReviewProgress(input);
-        return this.reviewProgressStore.update(input.snapshot, input.revision, input.entries, location);
+        const before = this.githubPullRequest()
+            ? await this.reviewProgressStore.read(input.snapshot).catch(() => null) : null;
+        const record = await this.reviewProgressStore.update(input.snapshot, input.revision, input.entries, location);
+        if (!before) return record;
+        const github_viewed = await this.syncViewed(before.entries, record.entries);
+        return github_viewed ? { ...record, github_viewed } : record;
+    }
+
+    // Only GitHub PRs reach GitHub's review, Viewed and thread APIs; Azure DevOps review stays read-only and local.
+    githubPullRequest() {
+        return Boolean(this.reviewTarget && supportsGitHubHandoff(this.reviewTarget));
+    }
+
+    // The PR's identity, author, viewer and per-file Viewed state, cached briefly so Review stays responsive.
+    async pullRequestInfo({ fresh = false } = {}) {
+        const url = this.reviewTarget?.url;
+        if (!this.githubPullRequest()) throw new Error("This review is not a GitHub pull request.");
+        if (!fresh && this.prStateCache?.url === url && Date.now() - this.prStateCache.at < 30_000) return this.prStateCache.value;
+        const value = await pullRequestState(url, this.repoRoot, this.github);
+        this.prStateCache = { url, at: Date.now(), value };
+        return value;
+    }
+
+    // Marking a file reviewed sets GitHub's "Viewed" checkbox for the reviewer, and un-marking clears it. Best effort:
+    // a failure is reported with the save and never blocks the local decision. Viewed is never set once the PR has
+    // newer commits than the reviewed snapshot, because GitHub would record the reviewer as having seen code they did not.
+    async syncViewed(previous, next) {
+        if (!this.githubPullRequest()) return null;
+        const reviewed = (entries, id) => entries?.[id]?.disposition === "reviewed";
+        const ids = new Set([...Object.keys(previous || {}), ...Object.keys(next || {})].filter((id) => id.startsWith("review-file:")));
+        const changes = [...ids].filter((id) => reviewed(previous, id) !== reviewed(next, id))
+            .map((id) => ({ path: id.slice("review-file:".length), viewed: reviewed(next, id) }));
+        if (!changes.length) return null;
+        const paths = changes.map((change) => change.path);
+        if (changes.length > 25) return { synced: 0, skipped: changes.length, paths, message: "Viewed on GitHub was not updated for this bulk change; mark files individually to sync." };
+        let synced = 0;
+        try {
+            const pr = await this.pullRequestInfo({ fresh: true });
+            if (pr.head !== this.model?.metadata?.head_sha) {
+                return { synced: 0, total: changes.length, paths, head_moved: true,
+                    message: `Viewed on GitHub was not updated: the pull request has newer commits (${String(pr.head || "").slice(0, 7)}) than this review.` };
+            }
+            for (const change of changes) {
+                if (pr.viewed[change.path] === change.viewed) { synced++; continue; }
+                await setFileViewed({ url: this.reviewTarget.url, pullRequestId: pr.id, path: change.path, viewed: change.viewed }, this.repoRoot, this.github);
+                pr.viewed[change.path] = change.viewed;
+                synced++;
+            }
+            return { synced, total: changes.length, paths };
+        } catch (error) {
+            return { synced, total: changes.length, paths, message: `Viewed on GitHub was not updated: ${error.message}` };
+        }
+    }
+
+    async reviewDrafts() {
+        if (!this.model || this.loading) throw new Error("Wait for the saved review before loading review comments.");
+        return this.reviewDraftStore.read(reviewSnapshotKey(this.model, this.reviewTarget));
+    }
+
+    // Lines GitHub accepts comments on for the reviewed head, cached per head. Null once the PR has moved past the review.
+    async pullRequestLines() {
+        const url = this.reviewTarget?.url;
+        const head = this.model?.metadata?.head_sha;
+        if (!this.githubPullRequest() || !url || !head) return null;
+        if (this.prLinesCache?.url === url && this.prLinesCache.head === head) return this.prLinesCache.lines;
+        const pr = await this.pullRequestInfo();
+        if (pr.head !== head) return null;
+        const lines = await pullRequestCommentableLines(url, this.repoRoot, this.github);
+        this.prLinesCache = { url, head, lines };
+        return lines;
+    }
+
+    async updateReviewDraft({ revision, action, comment, id, body }) {
+        const model = this.model;
+        if (!model || this.loading) throw new Error("Wait for the saved review before editing review comments.");
+        // On a pull request GitHub's own patch decides which lines can hold a comment; offline, the saved diff does.
+        if (action === "add" && this.githubPullRequest()) {
+            const pr = await this.pullRequestInfo().catch(() => null);
+            if (pr && pr.head !== model.metadata.head_sha) {
+                throw new Error(`The pull request has newer commits (${String(pr.head || "").slice(0, 7)}) than this review. Re-open it in Agent Review before commenting.`);
+            }
+        }
+        const lines = action === "add" && this.githubPullRequest() ? await this.pullRequestLines().catch(() => null) : null;
+        const change = action === "add" ? { action, comment: validateDraftComment(comment, model, lines) }
+            : action === "edit" ? (() => {
+                const text = typeof body === "string" ? body.trim() : "";
+                if (!text || text.length > 4000) throw new Error("A comment needs 1-4000 characters.");
+                return { action, id, body: text };
+            })()
+            : { action, id };
+        const result = await this.reviewDraftStore.update(reviewSnapshotKey(model, this.reviewTarget), revision, change);
+        if (this.model !== model) throw new Error("The review changed while saving the comment.");
+        return result;
+    }
+
+    // Local drafts plus, for a GitHub PR, its existing review threads and the reviewer's Viewed state.
+    async prReview() {
+        const drafts = await this.reviewDrafts();
+        if (this.reviewTarget?.provider === "ado") {
+            return { available: false, drafts, reason: "Azure DevOps review is read-only. Comments stay local drafts and export with the handoff; nothing is posted." };
+        }
+        if (!this.githubPullRequest()) {
+            return { available: false, drafts, reason: "Comments stay local drafts and export with the handoff. Open a GitHub pull request to post them." };
+        }
+        try {
+            const [pr, threads] = await Promise.all([this.pullRequestInfo(), pullRequestThreads(this.reviewTarget.url, this.repoRoot, this.github)]);
+            const reviewedHead = this.model.metadata.head_sha;
+            const head_matches = pr.head === reviewedHead;
+            // GitHub anchors threads to the PR's latest head. When that has moved on, place the threads written on the
+            // reviewed commit at their original lines and set the rest aside as belonging to other commits.
+            const anchored = head_matches ? threads : threads.map((thread) => thread.original_commit === reviewedHead && thread.original_line
+                ? { ...thread, line: thread.original_line, outdated: false } : { ...thread, outdated: true });
+            const lines = head_matches ? await this.pullRequestLines().catch(() => null) : null;
+            const commentable = lines && Object.fromEntries(Object.entries(lines).map(([path, sides]) => [path, { RIGHT: [...sides.RIGHT], LEFT: [...sides.LEFT] }]));
+            return { available: true, drafts, url: this.reviewTarget.url, author: pr.author, viewer: pr.viewer,
+                own: Boolean(pr.author && pr.author === pr.viewer), head_matches, head: pr.head, reviewed_head: reviewedHead,
+                state: pr.state, viewed: pr.viewed, threads: anchored, commentable };
+        } catch (error) {
+            return { available: true, drafts, url: this.reviewTarget.url, github_error: `GitHub could not be reached: ${error.message}` };
+        }
     }
 
     // The rail's layer order and AI layer lines, for summaries that should read in the same order as the review.
@@ -399,18 +558,34 @@ export class ReviewState {
         const target = this.reviewTarget;
         const progress = await this.progressForReview();
         if (this.model !== model || this.reviewTarget !== target) throw new Error("The review changed while preparing the handoff.");
-        const result = createReviewHandoff(model, target, progress, { testRun: this.testRun, layers: this.handoffLayers(model) });
+        const findings = [...groupFindings(model.attention || []), ...(this.generatedObservations || [])];
+        const run = this.testRun ? { ...this.testRun, stale: this.testRun.status === "complete" && this.testRunStale() } : null;
+        const priority = concernPriorities(buildReviewPlan(model, this.decisionMap, run, findings));
+        const drafts = await this.reviewDrafts();
+        const pr = supportsGitHubHandoff(target);
+        // On a PR the drafted comments are posted inline; elsewhere they travel in the summary.
+        const result = createReviewHandoff(model, target, progress, { testRun: run, layers: this.handoffLayers(model), priority,
+            comments: pr ? [] : drafts.comments, decisionMap: this.decisionMap });
         const token = randomUUID();
+        let author = null, viewer = null, head = null, prState = null;
+        if (pr) { try { ({ author, viewer, head, state: prState } = await this.pullRequestInfo({ fresh: true })); } catch { /* reported at submission */ } }
+        const moved = Boolean(pr && head && head !== model.metadata.head_sha);
+        const closed = Boolean(pr && prState && prState !== "OPEN");
         this.handoffPreview = { token, model, target, revision: progress.revision, snapshot: progress.snapshot,
-            body: result.markdown, created: Date.now(), consumed: false };
-        return { ...result, token, revision: progress.revision,
-            provider: target.provider === "ado" ? { available: false,
-                reason: "Azure DevOps review is read-only; publishing is unavailable. Export Markdown or review-state JSON locally instead." }
+            body: result.markdown, created: Date.now(), consumed: false, draftRevision: drafts.revision };
+        return { ...result, token, revision: progress.revision, comments: drafts.comments.length,
+            provider: target.provider === "ado" ? { available: false, url: target.url, commit: model.metadata.head_sha, comments: drafts.comments.length,
+                reason: "Azure DevOps review is read-only; publishing is unavailable. Export Markdown or review-state JSON locally instead; drafted line comments are included in the summary." }
                 : this.handoffSubmitting ? { available: false, pending: true, url: target.url, commit: model.metadata.head_sha,
                 reason: "Awaiting the previous submission receipt. Local export is available; do not submit again." }
                 : result.markdown.length > 60_000 ? { available: false, reason: "This summary exceeds the bounded PR review size. Export locally instead; nothing will be submitted." }
-                : supportsGitHubHandoff(target) ? { available: true, url: target.url, commit: model.metadata.head_sha }
-                : { available: false, reason: "Provider submission requires a loaded GitHub PR target. Local and commit reviews can export without creating a PR." } };
+                : moved ? { available: false, head_moved: true, url: target.url, commit: model.metadata.head_sha, head, comments: drafts.comments.length,
+                    reason: `The pull request has newer commits (${head.slice(0, 7)}) than this review (${model.metadata.head_sha.slice(0, 7)}). Re-open the pull request in Agent Review to review them; nothing can be posted from this snapshot. Local export is still available.` }
+                : closed ? { available: false, url: target.url, commit: model.metadata.head_sha, comments: drafts.comments.length,
+                    reason: `The pull request is ${prState.toLowerCase()}, so a review cannot be posted. Local export is still available.` }
+                : pr ? { available: true, url: target.url, commit: model.metadata.head_sha, comments: drafts.comments.length,
+                    own: Boolean(author && author === viewer), author, viewer }
+                : { available: false, reason: "Posting a review requires a GitHub pull request target. Commit and worktree reviews export locally; drafted line comments are included in the summary." } };
     }
 
     async importHandoff({ artifact, revision, confirm = false }) {
@@ -421,6 +596,7 @@ export class ReviewState {
         if (this.model !== model || this.reviewTarget !== target) throw new Error("The review changed during import.");
         if (revision !== current.revision) throw new Error("Saved progress changed. Preview the import again; nothing was overwritten.");
         const merged = new Map(Object.entries(current.entries));
+        let changes = 0;
         for (const [id, entry] of incoming) {
             const previous = merged.get(id);
             // An explicit "Not reviewed" with no note carries no decision; treat it like an absent record.
@@ -428,17 +604,24 @@ export class ReviewState {
             if (meaningful && (previous.disposition !== entry.disposition || previous.note !== entry.note)) {
                 throw new Error(`Import conflicts with an existing decision for ${previous.path || id.replace(/^review-file:/, "")}; nothing was overwritten.`);
             }
+            const same = previous ? previous.disposition === entry.disposition && (previous.note || "") === (entry.note || "")
+                : entry.disposition === "pending" && !entry.note;
+            if (!same) changes++;
             merged.set(id, entry);
         }
         const input = { snapshot: current.snapshot, revision: current.revision,
             entries: Object.fromEntries(merged), cursor: current.cursor || artifact.cursor || null };
         await this.validateReviewProgress(input);
-        if (confirm !== true) return { revision: current.revision, records: incoming.size,
-            repository: artifact.repository, identity: artifact.identity, message: "Exact saved source matches. Existing differing decisions are never overwritten." };
-        return this.saveReviewProgress(input);
+        if (confirm !== true) return { revision: current.revision, records: incoming.size, changes,
+            repository: artifact.repository, identity: artifact.identity, message: changes
+                ? "Exact saved source matches. Existing differing decisions are never overwritten."
+                : "Exact saved source matches. Every decision in this file is already saved here." };
+        // Nothing to apply: keep the saved revision so other tabs are not told progress changed.
+        if (!changes) return { ...current, changes: 0, unchanged: true };
+        return { ...await this.saveReviewProgress(input), changes };
     }
 
-    async submitHandoff({ token, confirm }) {
+    async submitHandoff({ token, confirm, event = "COMMENT", summary = "" }) {
         const preview = this.handoffPreview;
         if (confirm !== true || !preview || token !== preview.token || preview.consumed || this.handoffSubmitting || Date.now() - preview.created > 15 * 60_000) {
             throw new Error("A fresh preview and explicit confirmation are required; nothing was submitted.");
@@ -446,19 +629,33 @@ export class ReviewState {
         if (!supportsGitHubHandoff(preview.target)) {
             throw new Error("Provider publishing is unavailable for this target. Azure DevOps review is read-only; export locally instead.");
         }
+        if (!["COMMENT", "APPROVE", "REQUEST_CHANGES"].includes(event)) throw new Error("Choose Comment, Approve or Request changes; nothing was submitted.");
+        if (typeof summary !== "string" || summary.length > 10_000) throw new Error("Your summary must be text of at most 10,000 characters;         nothing was submitted.");
         if (this.loading || this.model !== preview.model || this.reviewTarget !== preview.target || preview.target.mode !== "pr") {
             throw new Error("The review target changed or is not a PR; nothing was submitted.");
         }
+        const lines = await this.pullRequestLines().catch(() => null);
         const progress = await this.progressForReview();
+        const drafts = await this.reviewDrafts();
         if (preview.consumed || this.handoffSubmitting || this.loading || this.model !== preview.model || this.reviewTarget !== preview.target
-            || progress.snapshot !== preview.snapshot || progress.revision !== preview.revision) {
-            throw new Error("Review decisions changed. Prepare a new preview before submitting.");
+            || progress.snapshot !== preview.snapshot || progress.revision !== preview.revision || drafts.revision !== preview.draftRevision) {
+            throw new Error("Review decisions or comments changed. Prepare a new preview before submitting.");
         }
+        const comments = drafts.comments.map((comment) => validateDraftComment(comment, preview.model, lines));
         preview.consumed = true;
         this.handoffSubmitting = true;
         try {
-            return await this.submitHandoffReview({ url: preview.target.url, commit: preview.model.metadata.head_sha,
-                body: preview.body, cwd: this.repoRoot });
+            // The reviewer's own words lead the review; the Agent Review summary follows as supporting detail.
+            const own = summary.trim();
+            const receipt = await this.submitHandoffReview({ url: preview.target.url, commit: preview.model.metadata.head_sha,
+                body: own ? `${own}\n\n---\n\n${preview.body}` : preview.body, cwd: this.repoRoot, event, comments });
+            // Posted comments now live on GitHub as threads; clear the local drafts so they are not posted twice.
+            if (comments.length) {
+                try { await this.reviewDraftStore.update(drafts.snapshot, drafts.revision, { action: "clear" }); }
+                catch (error) { receipt.drafts_warning = `Posted, but local drafts could not be cleared: ${error.message}. Delete them before submitting again.`; }
+            }
+            this.prStateCache = null;
+            return receipt;
         } finally { this.handoffSubmitting = false; }
     }
 
@@ -959,12 +1156,29 @@ export class ReviewState {
         return this.decisionMap;
     }
 
-    async testRunPlan() {
-        const adapter = testAdapterForMap(this.decisionMap);
-        const plan = adapter.tests.plan(this.decisionMap, this.repoRoot);
+    // A layer scope is the reader's current layer: a bounded list of changed files from this review.
+    testRunScope(layer) {
+        if (!layer) return null;
+        const changed = new Set((this.model?.changes || []).filter((change) => change.status !== "unchanged").map((change) => change.path));
+        const paths = Array.isArray(layer.paths) ? [...new Set(layer.paths)] : [];
+        if (!paths.length || paths.length > 2000 || paths.some((path) => typeof path !== "string" || !changed.has(path))) {
+            throw new Error("A layer run needs changed files from this review.");
+        }
+        const text = (value, limit) => typeof value === "string" ? value.slice(0, limit) : "";
+        return { id: text(layer.id, 200), name: text(layer.name, 200), number: Number.isInteger(layer.number) ? layer.number : null, paths };
+    }
+
+    async testRunPlan({ layer = null } = {}) {
+        const scope = this.testRunScope(layer);
+        const map = scope ? scopeDecisionMap(this.decisionMap, scope.paths) : this.decisionMap;
+        const adapter = testAdapterForMap(map);
+        const plan = adapter.tests.plan(map, this.repoRoot);
         const python = adapter.tests.resolveRuntime(this.repoRoot, await loadReviewConfig(this.repoRoot));
         const worktree = this.reviewTarget.mode === "worktree";
-        let reason = plan.reason;
+        // Say "no linked tests" only when none exist; otherwise keep the runner's own reason (for example an unsupported test shape).
+        const linked = (map?.verification?.tests || []).filter((test) => test.link !== "name-only").length;
+        let reason = scope && map?.status === "complete" && !linked ? "No linked tests reach this layer's changed code."
+            : plan.reason || (!plan.tests.length ? "No runnable linked tests were planned." : null);
         if (this.loading) reason = "Wait for the analysis to finish.";
         else if (worktree && this.worktreeChanged) reason = "The worktree changed since this review. Reanalyze before running linked tests.";
         else if (!worktree && !this.reviewTarget.currentRef) reason = "This snapshot has no commit to export for testing.";
@@ -972,15 +1186,23 @@ export class ReviewState {
             command: adapter.tests.formatCommand ? adapter.tests.formatCommand(python, plan)
                 : adapter.tests.command(python, plan).join(" "),
             location: worktree ? "the worktree" : `a temporary export of ${this.reviewTarget.label || this.reviewTarget.currentRef.slice(0, 7)}`,
-            available: !reason, reason };
+            scope, available: !reason, reason };
     }
 
     stopTestRun() {
         this.testRunController?.abort(new DOMException("Test run cancelled.", "AbortError"));
         this.testRunController = null;
         if (this.testRun?.status === "running") {
-            this.testRun = { ...this.testRun, status: "cancelled", finished_at: new Date().toISOString() };
+            const kept = this.testRunPrevious;
+            const finished_at = new Date().toISOString();
+            const { tests, executed, ran, counts, path_evidence_limitation, history, ...fields } = this.testRun;
+            const cancelled = { ...fields, status: "cancelled", finished_at };
+            const entry = kept?.record ? kept.record(cancelled) : null;
+            // Cancelling keeps what earlier runs established for this snapshot.
+            this.testRun = kept?.run ? { ...kept.run, history: [...(kept.history || []), ...(entry ? [entry] : [])] }
+                : { ...cancelled, history: [...(kept?.history || history || []), ...(entry ? [entry] : [])] };
         }
+        this.testRunPrevious = null;
     }
 
     // Only a worktree run can go stale: commit and PR snapshots are immutable.
@@ -998,34 +1220,52 @@ export class ReviewState {
         return this.testRun;
     }
 
-    // Explicit user action: executes the repository's tests, so it never starts automatically.
-    async runLinkedTests() {
+    // Explicit user action: executes the repository's tests, so it never starts automatically. With a layer, only the
+    // tests linked to that layer run, and their results join earlier results for this snapshot.
+    async runLinkedTests({ layer = null } = {}) {
         if (this.disposed) throw new Error("This review has been closed.");
         if (this.testRun?.status === "running" || this.testRunStarting) throw new Error("Linked tests are already running.");
         // Marked before any await so concurrent requests cannot both start a run.
         this.testRunStarting = true;
-        const map = this.decisionMap;
+        const fullMap = this.decisionMap;
         const generation = this.reviewGeneration;
         let plan;
         let python;
         let adapter;
+        let scope;
+        let map;
         try {
-            plan = await this.testRunPlan();
+            scope = this.testRunScope(layer);
+            map = scope ? scopeDecisionMap(fullMap, scope.paths) : fullMap;
+            plan = await this.testRunPlan({ layer });
             if (!plan.available) throw new Error(plan.reason);
             adapter = testAdapterForMap(map);
             python = adapter.tests.resolveRuntime(this.repoRoot, await loadReviewConfig(this.repoRoot));
             if (this.disposed || this.loading || this.refreshPromise || generation !== this.reviewGeneration
-                || this.decisionMap !== map || this.testRunStale()) {
+                || this.decisionMap !== fullMap || this.testRunStale()) {
                 throw new Error("The review changed before the linked tests could start. Try again.");
             }
         } finally {
             this.testRunStarting = false;
         }
+        const previousRun = this.testRun;
+        // Every run, full or per layer, builds on what earlier runs of this snapshot established; a cancel or error keeps it.
+        const prior = previousRun && previousRun.status !== "running" && !this.testRunStale() ? previousRun : null;
+        const previous = prior?.status === "complete" ? prior : null;
+        const history = prior?.history || [];
+        const plannedIds = [...new Set([...plan.tests, ...(map?.verification?.tests || []).filter((test) => test.link !== "name-only").map((test) => test.id)])];
         const controller = new AbortController();
         this.testRunController = controller;
         const snapshotRef = this.reviewTarget.mode === "worktree" ? null : this.reviewTarget.currentRef;
-        const run = { status: "running", started_at: new Date().toISOString(), command: plan.command, location: plan.location,
-            python: plan.python, python_source: plan.python_source, planned: plan.tests.length, omitted: plan.omitted };
+        const fields = { started_at: new Date().toISOString(), command: plan.command, location: plan.location,
+            python: plan.python, python_source: plan.python_source, planned: plan.tests.length, omitted: plan.omitted, scope };
+        const evidence = previous ? { tests: previous.tests, executed: previous.executed, ran: previous.ran, counts: previous.counts,
+            ...(previous.path_evidence_limitation ? { path_evidence_limitation: previous.path_evidence_limitation } : {}) } : {};
+        const run = { ...evidence, history, status: "running", ...fields };
+        const record = (outcome) => ({ scope: scope ? { id: scope.id, name: scope.name, number: scope.number, files: scope.paths.length } : null,
+            status: outcome.status, finished_at: outcome.finished_at, planned: plan.tests.length, ...(outcome.tests ? { cases: outcome.tests.length } : {}),
+            ...(outcome.counts ? { counts: outcome.counts } : {}), ...(outcome.error ? { error: outcome.error.split("\n")[0] } : {}) });
+        this.testRunPrevious = { run: previous, history, record };
         this.testRun = run;
         this.broadcast("test-run");
         this.testRunPromise = (async () => {
@@ -1044,17 +1284,23 @@ export class ReviewState {
                     id, outcome: record.outcome, duration_ms: record.duration_ms }));
                 const { executed, ran } = result.trace.per_test_path_evidence === false
                     ? { executed: {}, ran: {} } : mapExecutedPaths(map, result.trace, root);
-                return { ...run, status: "complete", finished_at: new Date().toISOString(), exit_code: result.exit_code,
+                const own = { status: "complete", ...fields, finished_at: new Date().toISOString(), exit_code: result.exit_code,
                     output: result.output, tests: results, executed, ran,
                     ...(result.path_evidence_limitation ? { path_evidence_limitation: result.path_evidence_limitation } : {}),
                     counts: Object.fromEntries(["passed", "failed", "error", "skipped"].map((outcome) =>
                         [outcome, results.filter((test) => test.outcome === outcome).length])) };
-            }, (error) => controller.signal.aborted
-                ? { ...run, status: "cancelled", finished_at: new Date().toISOString() }
-                : { ...run, status: "error", finished_at: new Date().toISOString(), error: error.message })
+                return { ...(previous ? mergeTestRuns(previous, own, plannedIds) : own), history: [...history, record(own)] };
+            }, (error) => {
+                const failed = controller.signal.aborted
+                    ? { status: "cancelled", ...fields, finished_at: new Date().toISOString() }
+                    : { status: "error", ...fields, finished_at: new Date().toISOString(), error: error.message };
+                // A failed or cancelled run keeps the evidence earlier runs established and records what happened.
+                return previous ? { ...previous, history: [...history, record(failed)] } : { ...failed, history: [...history, record(failed)] };
+            })
             .then((outcome) => {
                 if (this.testRunController === controller) this.testRunController = null;
                 if (this.disposed || generation !== this.reviewGeneration || this.testRun !== run) return outcome;
+                this.testRunPrevious = null;
                 this.testRun = outcome;
                 this.saveCurrentReview();
                 this.broadcast("test-run");
@@ -1279,8 +1525,8 @@ export class ReviewState {
                 this.reviewEvidence = result;
                 this.reviewEvidenceModel = model;
                 this.reviewEvidenceRevision++;
-                delete this.annotations.overview;
-                this.annotationPromises.delete("overview");
+                // Keep the summary on screen and rewrite it from the new evidence, rather than discarding it.
+                if (this.annotations.overview) this.refineOverview();
             }
             return result;
         } finally {
@@ -1708,33 +1954,17 @@ export class ReviewState {
         if (this.annotationPromises.has("overview")) return this.annotationPromises.get("overview");
         const generation = this.reviewGeneration;
         let evidenceRevision = null;
+        // The first summary comes from the saved code with one model call. When deeper review evidence is not ready yet,
+        // the summary is refined from it in the background instead of making the reader wait minutes for any summary.
         const promise = (async () => {
             const history = this.refreshHistoricalSessionContexts();
             if (history) await history;
             if (this.decisionMap?.status === "loading") await this.decisionMapFor();
             if (generation !== this.reviewGeneration) throw new Error("The review changed while loading summary context.");
             const context = this.overviewContext();
-            if (this.generateReviewPass) {
-                if (this.ruleCheck?.status === "running") await this.ruleCheckPromise;
-                let review = this.reviewEvidenceModel === this.model ? this.reviewEvidence : null;
-                if (!review) review = await this.internalReview(
-                    "Explain observable before/after behavior across this change. Collect concrete correctness risks and test evidence. Investigate cross-file contracts, defaults and units.",
-                    { scope: "overview" });
-                if (generation !== this.reviewGeneration) throw new Error("The review changed while collecting summary evidence.");
-                let remaining = 28_000;
-                const evidence = [];
-                // Rank confirmed concerns before behavior observations; keep underlying records intact.
-                for (const item of [...review.findings, ...review.observations]) {
-                    const characters = JSON.stringify(item).length;
-                    if (characters > remaining) continue;
-                    evidence.push(item);
-                    remaining -= characters;
-                }
-                context.code_context = [];
-                context.review_evidence = evidence;
-                context.evidence_limits = { ...review.coverage, status: review.status,
-                    omitted_records: review.findings.length + review.observations.length - evidence.length,
-                    gaps: review.gaps.slice(0, 10), omitted_gaps: Math.max(0, review.gaps.length - 10) };
+            const review = this.generateReviewPass && this.reviewEvidenceModel === this.model ? this.reviewEvidence : null;
+            if (review) {
+                applyOverviewEvidence(context, review);
                 evidenceRevision = this.reviewEvidenceRevision;
             }
             return this.generateAnnotation(context);
@@ -1749,18 +1979,72 @@ export class ReviewState {
                     item_id: "overview",
                     body: String(body || "").trim(),
                     evidence_ids: [],
+                    basis: evidenceRevision !== null ? "review" : "saved-code",
                     generated_at: new Date().toISOString(),
                 };
                 if (!annotation.body) throw new Error("Copilot returned an empty change summary.");
                 this.annotations.overview = annotation;
+                if (annotation.basis === "saved-code" && this.generateReviewPass) this.refineOverview();
                 this.broadcast("annotation");
-                return annotation;
+                return this.annotations.overview;
             })
             .finally(() => {
                 if (this.annotationPromises.get("overview") === promise) this.annotationPromises.delete("overview");
             });
         this.annotationPromises.set("overview", promise);
         return promise;
+    }
+
+    // Rewrites the change summary once deeper review evidence exists (the repository-rules pass, or a behavior pass when
+    // the repository has no rules). The earlier summary stays visible, marked as being refined, until the new one lands.
+    refineOverview() {
+        if (!this.generateReviewPass || !this.generateAnnotation || !this.model) return null;
+        if (this.annotations.overview) {
+            this.annotations.overview = { ...this.annotations.overview, refining: true };
+            this.broadcast("annotation");
+        }
+        if (this.overviewRefinePromise) {
+            this.overviewRefineAgain = true;
+            return this.overviewRefinePromise;
+        }
+        const generation = this.reviewGeneration;
+        const model = this.model;
+        const current = () => generation === this.reviewGeneration && this.model === model && !this.disposed;
+        this.overviewRefinePromise = (async () => {
+            do {
+                this.overviewRefineAgain = false;
+                if (this.ruleCheck?.status === "running") await this.ruleCheckPromise;
+                if (!current()) return;
+                let review = this.reviewEvidenceModel === model ? this.reviewEvidence : null;
+                if (!review) review = await this.internalReview(OVERVIEW_REVIEW_PROMPT, { scope: "overview" });
+                if (!current()) return;
+                const revision = this.reviewEvidenceRevision;
+                const context = this.overviewContext();
+                applyOverviewEvidence(context, review);
+                const body = String(await this.generateAnnotation(context) || "").trim();
+                if (!current()) return;
+                if (revision !== this.reviewEvidenceRevision) { this.overviewRefineAgain = true; continue; }
+                if (body) {
+                    this.annotations.overview = { id: "annotation:overview", item_id: "overview", body, evidence_ids: [],
+                        basis: "review", refining: this.overviewRefineAgain, generated_at: new Date().toISOString() };
+                    this.saveCurrentReview();
+                    this.broadcast("annotation");
+                }
+            } while (this.overviewRefineAgain && current());
+        })()
+            .catch((error) => {
+                if (!current()) return;
+                if (this.annotations.overview) this.annotations.overview = { ...this.annotations.overview, refine_error: error.message };
+                console.error("[agent-review overview]", error);
+            })
+            .finally(() => {
+                this.overviewRefinePromise = null;
+                if (current() && this.annotations.overview?.refining) {
+                    this.annotations.overview = { ...this.annotations.overview, refining: false };
+                    this.broadcast("annotation");
+                }
+            });
+        return this.overviewRefinePromise;
     }
 
     overviewContext() {
@@ -2068,6 +2352,7 @@ export class ReviewState {
         const saved = this.model?.source_files?.[path.replaceAll("\\", "/")];
         if (saved) {
             if (saved.binary) throw new Error(`Cannot display ${path}: the analyzed file is not UTF-8 text.`);
+            if (saved.omitted) throw new Error(`${path} is an unchanged generated or minified file; its text is not kept in this review.`);
             return saved.current;
         }
         if (this.model?.source_files) return null;

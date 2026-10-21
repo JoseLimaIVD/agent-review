@@ -6,6 +6,7 @@ import sys
 
 from churn import analyze_churn
 from codeboarding_adapter import load_codeboarding
+from generated_sources import generated_paths
 from git_snapshot import create_snapshot, discover_base, discover_repo, run_git
 from language_adapters import AnalysisSnapshot, active_adapters, merge_coverage
 from review_model import ReviewModel
@@ -56,9 +57,22 @@ def build_review(
     )
     progress("changes", "Computing changed files and line totals", 25)
     model.changes = snapshot.changes()
-    model.source_files = snapshot.source_files(model.changes)
-    analysis_snapshot = AnalysisSnapshot(repo, snapshot.baseline, snapshot.current, base_commit,
-                                         bool(current_arg), use_cache, head)
+    generated = generated_paths(snapshot.baseline, snapshot.current)
+    for change in model.changes:
+        if change["path"] in generated:
+            change["generated"] = True
+    model.source_files = snapshot.source_files(model.changes, generated)
+    # Language adapters see only hand-written source; generated bundles stay reviewable as files.
+    analysis_snapshot = AnalysisSnapshot(repo, {path: value for path, value in snapshot.baseline.items() if path not in generated},
+                                         {path: value for path, value in snapshot.current.items() if path not in generated},
+                                         base_commit, bool(current_arg), use_cache, head)
+    if generated:
+        changed = sorted(change["path"] for change in model.changes if change["path"] in generated and change["status"] != "unchanged")
+        model.warnings.append(
+            f"{len(generated):,} generated or minified file{'s' if len(generated) != 1 else ''} (built bundles, *.min.*, source maps) "
+            f"{'were' if len(generated) != 1 else 'was'} not parsed for symbols"
+            + (f"; {len(changed):,} changed, e.g. {changed[0]}, remain reviewable as files." if changed else "; none changed in this review.")
+        )
     adapters = active_adapters(analysis_snapshot)
     progress("dependencies", "Comparing package declarations and project version pins", 32)
     dependencies = {}

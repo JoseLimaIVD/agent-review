@@ -339,10 +339,11 @@ export function renderGraph(container, nodes, edges, onSelect, { viewport: fixed
             "marker-end": "url(#arrow)",
             tabindex: "0",
         });
-        const description = `${edge.type}: ${countLabel(edge.count || 1, "relationship")}`;
+        const description = `${edge.sentence || edge.type}: ${countLabel(edge.count || 1, "relationship")}`;
         const title = svg("title");
         title.textContent = description;
         path.append(title);
+        path.setAttribute("aria-label", description);
         path.addEventListener("click", (event) => {
             event.stopPropagation();
             onSelect(edge);
@@ -350,9 +351,9 @@ export function renderGraph(container, nodes, edges, onSelect, { viewport: fixed
         path.addEventListener("keydown", (event) => event.key === "Enter" && onSelect(edge));
         edgeLayer.append(path);
         let label = null;
-        if ((edge.count || 1) > 1) {
-            label = svg("text", { class: "edge-label" });
-            label.textContent = String(edge.count);
+        if (edge.label || (edge.count || 1) > 1) {
+            label = svg("text", { class: `edge-label${edge.label ? " edge-sentence" : ""}` });
+            label.textContent = edge.label ? `${edge.label}${(edge.count || 1) > 1 ? ` ×${edge.count}` : ""}` : String(edge.count);
             edgeLayer.append(label);
         }
         const record = { edge, path, label };

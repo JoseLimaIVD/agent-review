@@ -90,6 +90,21 @@ export function isReviewComplete(disposition) {
 
 export const fileReviewId = (path) => `review-file:${path}`;
 
+const SET_ASIDE = new Set(["accepted", "false-positive"]);
+
+// A concern's own triage, recorded on its planned unit (code or package) or on the concern itself.
+export function concernTriage(finding, entries) {
+    const packageId = finding.package_id || (String(finding.id || "").startsWith("package:") ? finding.id : null);
+    for (const id of [finding.node_id && `review:${finding.node_id}`, packageId && `review:${packageId}`, finding.id, finding.id && `review:${finding.id}`]) {
+        const disposition = id && entries.get(id)?.disposition;
+        if (disposition && disposition !== "pending") return disposition;
+    }
+    return null;
+}
+
+// Accepted risks and false positives are set aside: not counted as active and not listed as open priorities.
+export const isConcernSetAside = (finding, entries) => SET_ASIDE.has(concernTriage(finding, entries));
+
 export function fileReviewProgress(model, entries) {
     const files = (model?.changes || []).filter((file) => file.status !== "unchanged");
     let reviewed = 0, followUp = 0;

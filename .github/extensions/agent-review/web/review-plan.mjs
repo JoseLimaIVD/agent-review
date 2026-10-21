@@ -190,5 +190,21 @@ export function buildReviewPlan(model, decisionMap, testRun, findings = []) {
     const plan = ordered.slice(0, MAX_REVIEW_ITEMS);
     plan.omitted = Math.max(0, ordered.length - plan.length);
     plan.qualifying = ordered.length;
+    plan.units = units;
     return plan;
+}
+
+// One priority per concern, shown identically everywhere: the planned unit's score when the concern's code or package is
+// planned, otherwise the analyzer's static impact for that concern.
+export function concernPriorities(plan) {
+    const byNode = new Map();
+    const byPackage = new Map();
+    for (const unit of plan.units || plan) {
+        if (unit.node?.id) byNode.set(unit.node.id, Math.max(unit.score, byNode.get(unit.node.id) ?? -1));
+        if (unit.package?.id) byPackage.set(unit.package.id, unit.score);
+    }
+    return (finding) => {
+        const packageId = finding.package_id || (String(finding.id || "").startsWith("package:") ? finding.id : null);
+        return byNode.get(finding.node_id) ?? (packageId ? byPackage.get(packageId) : undefined) ?? finding.impact_score ?? null;
+    };
 }

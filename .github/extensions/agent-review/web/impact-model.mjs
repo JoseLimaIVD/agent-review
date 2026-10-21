@@ -3,9 +3,25 @@ import { isTestPath } from "./languages.mjs";
 const indexes = new WeakMap();
 const relationshipTypes = new Set(["calls", "imports", "inherits", "uses_package"]);
 
+// The analyzer can mark members "modified" when only their file or containing type changed. Impact shows a callable as
+// changed only when its own lines changed or it was added/removed; packages, classes and modules keep the analyzer's flag.
+const CALLABLE_KINDS = new Set(["function", "method", "constructor"]);
+function effectiveChange(node, changedPaths) {
+    if (node.change !== "modified" || !CALLABLE_KINDS.has(node.kind)) return node.change;
+    if (node.path && !changedPaths.has(node.path)) return "unchanged";
+    const metrics = node.metrics || {};
+    const delta = metrics.lines_changed ?? ((metrics.lines_added ?? 0) + (metrics.lines_removed ?? 0));
+    return metrics.lines_changed === undefined && metrics.lines_added === undefined && metrics.lines_removed === undefined
+        ? node.change : delta > 0 ? "modified" : "unchanged";
+}
+
 function indexFor(model) {
     if (indexes.has(model)) return indexes.get(model);
-    const nodes = new Map((model.nodes || []).map((node) => [node.id, node]));
+    const changedPaths = new Set((model.changes || []).filter((change) => change.status !== "unchanged").map((change) => change.path));
+    const nodes = new Map((model.nodes || []).map((node) => {
+        const change = effectiveChange(node, changedPaths);
+        return [node.id, change === node.change ? node : { ...node, change, analyzer_change: node.change }];
+    }));
     for (const item of [...model.package_changes || [], ...model.package_dependencies || []]) {
         if (!item.id || nodes.has(item.id)) continue;
         nodes.set(item.id, { ...item, kind: "package", name: item.name, change: item.change || "unchanged",
@@ -111,7 +127,16 @@ export function impactSlice(model, id, { depth = 1, direction = "both", maxNodes
     if (omitted.size) gaps.push(`${omitted.size} encountered components are omitted by the ${maxNodes}-component view limit.`);
     if (boundary.size) gaps.push("Additional relationships exist beyond the current depth. Expand one step to inspect them.");
     if (index.unsupported) gaps.push(`${index.unsupported} repository relationships lack resolved endpoints or saved evidence and are not drawn.`);
-    return { seed_ids: seeds, nodes: [...selected.values()], edges: [...edges.values()],
+    // Short edge sentences ("calls · export.py:285") name the relationship and where it is evidenced; dense graphs keep
+    // them in tooltips so labels never pile up.
+    const verbs = { calls: "calls", imports: "imports", inherits: "inherits", uses_package: "uses" };
+    const labelled = [...edges.values()].map((edge) => {
+        const evidence = (edge.evidence_ids || []).map((evidenceId) => model.evidence?.[evidenceId]).find((item) => item?.path);
+        const where = evidence ? `${evidence.path.split("/").at(-1)}${evidence.line ? `:${evidence.line}` : ""}` : null;
+        const sentence = `${edge.change === "removed" ? "formerly " : ""}${verbs[edge.type] || edge.type}${where ? ` · ${where}` : ""}`;
+        return { ...edge, sentence, label: edges.size <= 16 ? sentence : null };
+    });
+    return { seed_ids: seeds, nodes: [...selected.values()], edges: labelled,
         paths: Object.fromEntries(paths), gaps, omitted: omitted.size, boundary: boundary.size,
         counts: Object.fromEntries(["Changed focus", "Selected focus", "Potential consumer", "Dependency", "Related test"]
             .map((role) => [role, [...selected.values()].filter((node) => node.impact_role === role).length])) };

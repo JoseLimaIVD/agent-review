@@ -31,7 +31,7 @@ try {
             const context = page.locator("#source-review-context");
             await context.getByRole("heading", { name: "Who might be affected?", exact: true }).waitFor();
             assert.match(await context.textContent(), /What was verified\?.*What remains open\?/s);
-            assert.match(await context.textContent(), /No linked-test run|Repository linked-test run/);
+            assert.match(await context.textContent(), /No linked-test run|Repository linked-test (run|results)/);
             assert.equal(await page.locator("#source-origin").evaluate((details) => details.open), false);
             await context.getByRole("button", { name: "Inspect impact", exact: true }).click();
             await page.locator("#workspace-return-source").click();

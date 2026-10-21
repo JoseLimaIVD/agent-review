@@ -35,6 +35,7 @@ const staticFiles = new Map([
     ["/diff-context.mjs", "diff-context.mjs"],
     ["/impact-model.mjs", "impact-model.mjs"],
     ["/item-discussion-ui.mjs", "item-discussion-ui.mjs"],
+    ["/ai-activity.mjs", "ai-activity.mjs"],
     ["/review-location.mjs", "review-location.mjs"],
     ["/review-presentation.mjs", "review-presentation.mjs"],
     ["/review-workspace.mjs", "review-workspace.mjs"],
@@ -145,6 +146,18 @@ export function startReviewServer(state, options = {}) {
                 sendJson(res, await state.submitHandoff(await readJson(req)));
                 return;
             }
+            if (req.method === "GET" && pathname === "/api/pr-review") {
+                sendJson(res, await state.prReview());
+                return;
+            }
+            if (req.method === "POST" && pathname === "/api/pr-review/drafts") {
+                try { sendJson(res, await state.updateReviewDraft(await readJson(req))); }
+                catch (error) {
+                    if (error.code !== "review_draft_conflict") throw error;
+                    sendJson(res, { error: error.message, code: error.code }, 409);
+                }
+                return;
+            }
             if (req.method === "POST" && pathname === "/api/review-progress") {
                 try { sendJson(res, await state.saveReviewProgress(await readJson(req))); }
                 catch (error) {
@@ -207,8 +220,14 @@ export function startReviewServer(state, options = {}) {
                 sendJson(res, await state.testRunPlan());
                 return;
             }
+            if (req.method === "POST" && pathname === "/api/test-run/plan") {
+                const input = await readJson(req);
+                sendJson(res, await state.testRunPlan({ layer: input?.layer || null }));
+                return;
+            }
             if (req.method === "POST" && pathname === "/api/test-run") {
-                sendJson(res, { run: await state.runLinkedTests() }, 202);
+                const input = await readJson(req);
+                sendJson(res, { run: await state.runLinkedTests({ layer: input?.layer || null }) }, 202);
                 return;
             }
             if (req.method === "POST" && pathname === "/api/test-run/cancel") {

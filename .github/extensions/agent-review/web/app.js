@@ -6,21 +6,22 @@ import { resolveSourceReference } from "/source-references.mjs";
 import { unchangedDiffContext, diffSegments } from "/diff-context.mjs";
 import { impactSlice } from "/impact-model.mjs";
 import { ItemDiscussionPane } from "/item-discussion-ui.mjs";
+import { aiPlaceholder as activityPlaceholder } from "/ai-activity.mjs";
 import { parseReviewLocation, reviewLocation } from "/review-location.mjs";
 import { annotationSections, conciseReviewText, overviewBlurb, reviewCommands, reviewContext, reviewItemEvidence, reviewSignal } from "/review-presentation.mjs";
 import { isReviewSymbol, isTestPath, languageForPath } from "/languages.mjs";
 import { ConnectionFeedback } from "/connection-feedback.mjs";
-import { describeAnalysisWarning } from "/analysis-limitations.mjs";
-import { buildReviewPlan } from "/review-plan.mjs";
-import { fileTree, groupForSource, reviewSequence, workspaceNavigation } from "/review-workspace.mjs";
+import { describeAnalysisWarning, summarizeAnalysisWarnings, unlinkedSentence } from "/analysis-limitations.mjs";
+import { buildReviewPlan, concernPriorities } from "/review-plan.mjs";
+import { fileTree, groupForSource, reviewSequence, treeTotals, workspaceNavigation } from "/review-workspace.mjs";
 import { countLabel, plural } from "/count-format.mjs";
 import {
-    REVIEW_DISPOSITIONS, effectiveDisposition, fileReviewId, fileReviewProgress, isReviewComplete, nextFileReview, parseReviewLedger, reviewProgress,
+    REVIEW_DISPOSITIONS, concernTriage, effectiveDisposition, fileReviewId, fileReviewProgress, isConcernSetAside, isReviewComplete, nextFileReview, parseReviewLedger, reviewProgress,
     reviewSnapshotKey, serializeReviewLedger,
 } from "/review-ledger.mjs";
 import {
     callableName, callablesForSubject, changedCallables, decisionAction, decisionConditions, decisionSentence, decisionTotals,
-    EVIDENCE_GROUPS, evidenceCounts, linkedTestOutcome, pathEvidence,
+    EVIDENCE_GROUPS, baseTestId, evidenceCounts, layerTestStatus, linkedTestOutcome, pathEvidence, scopeDecisionMap,
 } from "/decision-map.mjs";
 
 const state = {
@@ -55,6 +56,7 @@ const state = {
     readingPane: "code",
     exploring: false,
     fileReviewDrafts: new Map(),
+    annotationRequests: new Map(),
 };
 const elements = Object.fromEntries([
     "source-coverage", "source-position", "diff-layout", "source-strip", "source-strip-toggle", "source-strip-body", "overview-layers", "overview-stats", "overview-limitation",
@@ -62,17 +64,17 @@ const elements = Object.fromEntries([
     "review-overview", "review-background", "overview-title", "overview-description", "overview-progress", "overview-scope", "overview-start", "overview-files",
     "review-workflow", "workflow-overview", "workflow-review", "workflow-finish", "review-finish", "workspace-target", "workspace-freshness", "workspace-find", "workspace-nav-toggle",
     "workspace-return-source", "review-navigation", "workspace-groups", "workspace-files", "workspace-search", "workspace-count",
-    "workspace-nav-list", "workspace-code", "workspace-context", "workspace-group-label", "workspace-group-retry",
-    "workspace-discuss", "source-review-context", "source-origin",
+    "workspace-nav-list", "workspace-code", "workspace-context", "workspace-group-label", "workspace-group-retry", "workspace-prefetch", "overview-prefetch",
+    "workspace-discuss", "workspace-comment", "source-review-context", "source-origin",
     "explore-priorities", "explore-concerns", "explore-groups", "explore-architecture", "explore-paths", "explore-packages",
     "review-progress-status", "review-progress-retry", "review-progress-backup", "file-review-form", "file-review-label",
     "file-review-disposition", "file-review-note", "file-review-save", "file-review-next", "file-review-status", "file-review-retry",
     "group-review-dialog", "group-review-title", "group-review-scope", "group-review-error", "group-review-confirm", "group-review-cancel",
     "review-handoff", "handoff-close", "handoff-status", "handoff-error", "handoff-refresh", "handoff-markdown",
     "handoff-markdown-save", "handoff-state-save", "handoff-state-preview", "handoff-import-file", "handoff-import-preview",
-    "handoff-import-confirm", "handoff-import-error", "handoff-provider", "handoff-provider-status", "handoff-provider-error", "handoff-confirm", "handoff-submit",
+    "handoff-import-confirm", "handoff-import-error", "handoff-provider", "handoff-provider-section", "handoff-verdict", "handoff-confirm-text", "handoff-provider-status", "handoff-provider-error", "handoff-confirm", "handoff-submit", "handoff-summary",
     "status", "refresh", "cancel-analysis", "analysis-cancelled", "source-context-notice", "connection-notice", "reconnect", "worktree-notice", "worktree-notice-text", "worktree-overview", "error", "analysis-progress", "progress-phase", "progress-message", "progress-percent",
-    "progress-bar", "summary", "breadcrumbs", "attention", "attention-count", "packages", "rail-resize", "impact-view", "source-impact",
+    "progress-bar", "summary", "breadcrumbs", "attention", "attention-count", "packages", "rail-resize", "workspace-nav-resize", "source-side-resize", "impact-view", "source-impact",
     "show-evidence", "show-discussion", "item-discussion", "sections-view", "source-section",
     "source-focus", "source-location", "review-command-open", "review-command-palette", "review-command-close", "review-command-query", "review-command-count", "review-command-results",
     "graph", "level-label", "graph-title", "zoom-out", "changed-only", "review-search", "detail-toggle", "detail", "detail-close", "source-panel", "source-title",
@@ -105,6 +107,8 @@ function renderWorkspaceShell() {
     const ready = Boolean(state.payload?.model && !state.reviewPickerPending && !state.reviewSubmitting);
     const reviewing = ready && state.reviewPage === "review";
     document.body.classList.toggle("review-ready", ready);
+    // Code paths is offered only when this review has code-path data to show (loading, complete or a reported failure).
+    elements.explore_paths.classList.toggle("hidden", !state.payload?.decision_map);
     elements.review_workflow.classList.toggle("hidden", !ready);
     document.body.classList.toggle("reviewing", reviewing);
     document.body.classList.toggle("reading-source", reviewing && !elements.source_panel.classList.contains("hidden"));
@@ -190,6 +194,9 @@ async function returnWorkspaceSource({ code = false } = {}) {
     setDiscussionMode(!code && Boolean(saved.discussion));
     render();
     if (await renderSource()) {
+        if (state.selected && state.annotationRequests.has(`${state.payload.review_generation}:${state.selected.id}`)) {
+            ensureAnnotation(state.selected);
+        }
         elements.source.scrollTop = saved.scroll.top;
         elements.source.scrollLeft = saved.scroll.left;
         elements.source_panel.querySelector(".source-side").scrollTop = saved.scroll.side;
@@ -291,13 +298,30 @@ function ensureLayerSummaries() {
     const generation = state.payload?.review_generation;
     if (!state.payload || state.payload.annotations?.layers?.titles || state.layerSummaryRequested === generation) return;
     state.layerSummaryRequested = generation;
+    state.layerSummaryError = null;
+    state.layerSummaryLoading = true;
     api("/api/layer-summaries", { method: "POST", body: "{}" }).then((result) => {
         if (state.payload?.review_generation !== generation) return;
         state.payload.annotations = { ...(state.payload.annotations || {}), layers: result.annotation };
+    }, (error) => {
+        if (state.payload?.review_generation === generation) state.layerSummaryError = error.message;
+    }).finally(() => {
+        if (state.payload?.review_generation !== generation) return;
+        state.layerSummaryLoading = false;
         state.navigationKey = null;
         renderWorkspaceNavigation();
         renderReviewOverview();
-    }, (error) => { state.layerSummaryError = error.message; });
+    });
+}
+
+function layerSummaryStatus(container, layer, key) {
+    if (layer.supporting) return;
+    if (state.layerSummaryLoading && !state.payload.annotations?.layers?.titles) {
+        container.append(aiPlaceholder(key, "Copilot is writing layer titles and summaries...", 1));
+    } else if (state.layerSummaryError) {
+        const error = el("span", "layer-summary-error muted", `AI layer summary unavailable: ${state.layerSummaryError}`);
+        container.append(error);
+    }
 }
 
 // Long file names wrap at dots, dashes and underscores before ever breaking inside a word.
@@ -315,7 +339,7 @@ function bulkReviewLink(entry, text) {
         elements.group_review_error.classList.add("hidden");
         elements.group_review_title.textContent = `Mark ${entry.files.length} files reviewed`;
         elements.group_review_scope.textContent = `${entry.title}. This includes every changed file in this group, not just files matching the current filter. Existing notes are kept.`;
-        elements.group_review_confirm.disabled = !state.progressReady || state.progressSaving;
+        elements.group_review_confirm.disabled = !state.progressReady || savingDecision();
         elements.group_review_dialog.showModal();
     });
     return mark;
@@ -332,13 +356,18 @@ function renderWorkspaceNavigation() {
     const changedFile = location && navigation.files.some((file) => file.path === location.path);
     const layer = group && navigation.layers.find((item) => item.id === group.layer);
     const groupLabel = group?.label || group?.title;
-    elements.workspace_group_label.textContent = group ? `${layer && navigation.layers.length > 1
-        ? `${layerLabel(layer)}${groupLabel === layer.name ? "" : " › "}` : ""}${groupLabel === layer?.name && navigation.layers.length > 1 ? "" : groupLabel}`
+    // When the open file is a test or consumer listed under another file's group, name the open file first.
+    const primaryPath = group?.primaries?.[0];
+    const attachedRole = group && !group.cohort && location?.path && primaryPath && !group.primaries.includes(location.path)
+        && group.roles?.get?.(location.path);
+    const openLabel = attachedRole ? `${location.path.split("/").at(-1)} — ${attachedRole === "test" ? "test" : attachedRole === "consumer" ? "consumer" : "related file"} of ${primaryPath.split("/").at(-1)}` : null;
+    elements.workspace_group_label.textContent = group ? `${layer
+        ? `${layerLabel(layer)}${(openLabel || groupLabel) === layer.name ? "" : " › "}` : ""}${openLabel || (groupLabel === layer?.name ? "" : groupLabel)}`
         : (changedFile ? "Changed file · this line is outside its grouped change ranges"
             : state.source ? "Related source outside the changed-file groups" : "Choose a group or file");
     const query = state.navigationQuery.toLowerCase().trim();
     if (data) ensureLayerSummaries();
-    const key = `${state.payload.review_generation}:${state.sectionDataKey}:${state.navigationMode}:${query}:${state.payload.annotations?.layers?.generated_at || ""}`;
+    const key = `${state.payload.review_generation}:${state.sectionDataKey}:${state.navigationMode}:${query}:${state.payload.annotations?.layers?.generated_at || ""}:${state.layerSummaryLoading}:${state.layerSummaryError}`;
     elements.workspace_groups.setAttribute("aria-pressed", String(state.navigationMode === "groups"));
     elements.workspace_files.setAttribute("aria-pressed", String(state.navigationMode === "files"));
     const storyLayers = navigation.layers.filter((item) => !item.supporting).length;
@@ -353,7 +382,13 @@ function renderWorkspaceNavigation() {
             for (const directory of [...tree.directories.values()].sort((a, b) => a.name.localeCompare(b.name))) {
                 const details = el("details", "workspace-folder");
                 details.dataset.prefix = directory.path;
-                details.append(el("summary", "", directory.name));
+                // A collapsed folder still says how much changed inside it.
+                const totals = treeTotals(directory);
+                const summary = el("summary", "", directory.name);
+                const meta = el("span", "workspace-folder-meta", `${countLabel(totals.files, "file")} · +${totals.added.toLocaleString()} −${totals.removed.toLocaleString()}`);
+                summary.title = `${directory.path}: ${countLabel(totals.files, "changed file")}, ${totals.added.toLocaleString()} added and ${totals.removed.toLocaleString()} removed lines`;
+                summary.prepend(meta);
+                details.append(summary);
                 appendTree(details, directory, owner);
                 if (query) details.open = true;
                 container.append(details);
@@ -369,7 +404,7 @@ function renderWorkspaceNavigation() {
                     const meta = el("span", "workspace-file-meta");
                     meta.append(el("span", "workspace-file-delta", `+${file.lines_added || 0} −${file.lines_removed || 0}`));
                     if (layer) {
-                        const chip = el("span", "layer-chip layer-chip-inline", layer.number ? String(layer.number) : "·");
+                        const chip = layerMarker(layer, "layer-chip layer-chip-inline");
                         chip.title = layerLabel(layer);
                         meta.append(chip);
                     }
@@ -393,9 +428,19 @@ function renderWorkspaceNavigation() {
             section.open = true;
             section.dataset.layer = layer.id;
             const heading = el("summary", "workspace-layer-heading");
+            heading.title = "Expand or collapse this layer's files";
             const name = el("span", "workspace-layer-name");
             const title = layerTitle(layer);
-            name.append(el("span", "workspace-layer-number", layer.number ? String(layer.number) : "·"),
+            const openTitle = el("button", "workspace-layer-open", "Review layer");
+            openTitle.type = "button";
+            openTitle.title = `Open ${layerLabel(layer)} at its next unreviewed file`;
+            openTitle.setAttribute("aria-label", `Review layer: ${layerLabel(layer)}`);
+            openTitle.addEventListener("click", (event) => {
+                event.preventDefault();
+                section.open = true;
+                openLayer(navigation, layer);
+            });
+            name.append(layerMarker(layer, "workspace-layer-number"),
                 titleWithBadge(title, title !== layer.name, "AI-written step title; the area name is shown below"));
             const meta = el("span", "workspace-layer-meta");
             if (title !== layer.name) meta.append(el("span", "", layer.name));
@@ -410,6 +455,8 @@ function renderWorkspaceNavigation() {
             }
             const progress = el("span", "workspace-layer-progress muted");
             progress.dataset.layerProgress = layer.id;
+            const tests = el("span", "workspace-layer-tests");
+            tests.dataset.layerTests = layer.id;
             const intent = state.payload.annotations?.layers?.intents?.[layer.id];
             let intentLine = null;
             if (intent) {
@@ -417,8 +464,11 @@ function renderWorkspaceNavigation() {
                 intentLine.append(el("span", "workspace-layer-ai", "AI"), document.createTextNode(intent));
                 intentLine.title = `${intent}\n\nAI interpretation of this layer's saved diff. Verify in the code.`;
             } else if (layer.summary) intentLine = el("span", "workspace-layer-intent workspace-layer-fallback", layer.summary);
-            heading.append(name, progress, ...(intentLine ? [intentLine] : []), meta);
-            section.append(heading);
+            heading.append(name, progress, tests, ...(intentLine ? [intentLine] : []), meta);
+            const actions = el("div", "workspace-layer-actions");
+            actions.append(openTitle);
+            layerSummaryStatus(actions, layer, `layer:${layer.id}`);
+            section.append(heading, actions);
             for (const { entry, files } of layerGroups) {
                 if (entry.supporting) {
                     const tree = el("div", "workspace-supporting");
@@ -432,7 +482,9 @@ function renderWorkspaceNavigation() {
                     const details = el("details", "workspace-group");
                     details.dataset.group = entry.id;
                     const summary = el("summary", "");
-                    const open = el("button", "", entry.title);
+                    summary.append(el("strong", "", entry.title));
+                    summary.title = "Expand or collapse this group's files";
+                    const open = el("button", "workspace-group-open", "Review group");
                     open.type = "button";
                     open.title = entry.section?.summary || entry.title;
                     open.addEventListener("click", (event) => {
@@ -443,9 +495,8 @@ function renderWorkspaceNavigation() {
                     });
                     const count = el("span", "muted", String(files.length));
                     count.dataset.groupProgress = entry.id;
-                    summary.append(open);
                     if (layer.groups.length > 1) summary.append(count);
-                    details.append(summary);
+                    details.append(summary, open);
                     appendTree(details, fileTree(files), entry);
                     details.append(bulkReviewLink(entry, "Review all group files…"));
                     if (query) details.open = true;
@@ -525,6 +576,11 @@ function renderWorkspaceNavigation() {
         count.textContent = `${reviewedIn(files)}/${files.length}`;
         count.title = `${reviewedIn(files)} of ${countLabel(files.length, "file")} in this layer marked reviewed`;
     }
+    for (const slot of elements.workspace_nav_list.querySelectorAll("[data-layer-tests]")) {
+        const entry = navigation.layers.find((layer) => layer.id === slot.dataset.layerTests);
+        const chip = entry && layerTestChip(entry);
+        slot.replaceChildren(...(chip ? [chip] : []));
+    }
 }
 
 async function openWorkspaceFile(file, group = null) {
@@ -548,7 +604,8 @@ async function openWorkspaceFile(file, group = null) {
     const node = range?.symbol_id && state.payload.model.nodes.find((node) => node.id === range.symbol_id);
     try {
         if (node) await selectItem(node, false);
-        else await selectFile(file, false);
+        // Generated bundles are not sent to Copilot; every other file gets its explanation.
+        else await selectFile(file, !file.generated);
     } finally {
         if (state.pendingSource === pending) {
             state.pendingSource = null;
@@ -850,6 +907,7 @@ async function discussItem(item = state.selected) {
 elements.show_evidence.addEventListener("click", () => setDiscussionMode(false));
 elements.show_discussion.addEventListener("click", () => discussItem().catch(showError));
 elements.workspace_discuss.addEventListener("click", () => discussItem().catch(showError));
+elements.workspace_comment.addEventListener("click", () => commentOnCurrentLine());
 
 function el(tag, className, text) {
     const node = document.createElement(tag);
@@ -865,19 +923,7 @@ const REVEAL_MS = 450;
 // Shimmering placeholder in the shape of the content that will replace it.
 function aiPlaceholder(key, label, lines = 3) {
     pendingAi.add(key);
-    const wrapper = el("div", "ai-pending");
-    wrapper.setAttribute("role", "status");
-    wrapper.setAttribute("aria-live", "polite");
-    const heading = el("p", "ai-pending-label");
-    heading.append(el("span", "ai-pending-dot"), document.createTextNode(label));
-    wrapper.append(heading);
-    const widths = [94, 81, 88, 67, 90, 74];
-    for (let index = 0; index < lines; index++) {
-        const bar = el("span", "ai-pending-line");
-        bar.style.width = `${widths[index % widths.length]}%`;
-        wrapper.append(bar);
-    }
-    return wrapper;
+    return activityPlaceholder(label, lines);
 }
 
 // Animate a result in only when it replaces a placeholder the reader saw. Server updates
@@ -1056,8 +1102,10 @@ function renderSummary(model) {
     if (!model.coverage?.available) qualityIssues.push(historical
         ? "Coverage is unavailable for this historical snapshot. Working-tree coverage reports are not applied to commit or PR reviews."
         : `No usable coverage report for this worktree snapshot. ${coveragePrerequisite}, then Reanalyze.`);
-    if (warnings.length) qualityIssues.push(
-        `${countLabel(warnings.length, "static-analysis note")} ${plural(warnings.length, "describes", "describe")} what could not be verified.`);
+    const notes = summarizeAnalysisWarnings(warnings);
+    if (notes.other.length) qualityIssues.push(
+        `${countLabel(notes.other.length, "static-analysis note")} ${plural(notes.other.length, "describes", "describe")} what could not be verified.`);
+    if (notes.unlinked) qualityIssues.push(unlinkedSentence(notes));
     elements.overview_limitation.replaceChildren();
     elements.overview_limitation.classList.toggle("hidden", !qualityIssues.length);
     if (qualityIssues.length) {
@@ -1066,7 +1114,7 @@ function renderSummary(model) {
             state.selected = {
                 id: "analysis-quality", kind: "analysis", name: "Analysis limitations",
                 reason: qualityIssues.join("\n"),
-                analysis_warnings: warnings,
+                analysis_warnings: notes.ordered,
             };
             // The detail pane lives in the workspace; open it there so the limitation is visible in one click.
             if (state.reviewPage !== "review" || !state.exploring) {
@@ -1100,7 +1148,9 @@ function evidenceLabel(id) {
 }
 
 function evidenceButton(id) {
-    const button = el("button", "evidence-link", evidenceLabel(id));
+    const button = el("button", "evidence-link");
+    // Long paths wrap at separators rather than inside a file name or line number.
+    for (const part of String(evidenceLabel(id)).split(/(?<=[/._\- ])/)) button.append(document.createTextNode(part), document.createElement("wbr"));
     button.type = "button";
     button.title = id;
     button.addEventListener("click", () => selectItem({ id, kind: "evidence" }, false));
@@ -1168,9 +1218,10 @@ function renderCards(container, items, emptyText) {
         const heading = el("div", "card-heading");
         heading.append(el("strong", "", item.title || item.name || item.id));
         if (container === elements.attention) heading.append(el("span", "signal-label", signal.label));
-        if (item.impact_score != null) {
-            const priority = el("b", "impact-score", `Static impact ${item.impact_score}/100`);
-            priority.title = "Static change-impact score for this concern. The focused review queue's Priority also weighs churn, callers and test evidence. Not a vulnerability or package security score.";
+        const priorityValue = item.impact_score != null || item.node_id || item.package_id ? concernPriority(item) : null;
+        if (priorityValue != null) {
+            const priority = el("b", "impact-score", `Static priority ${priorityValue}/100`);
+            priority.title = "Deterministic static priority (not an AI judgement or a security score). Concerns in the focused queue also weigh churn, caller reach and test evidence; others use the analyzer's impact score. The same number appears on the code strip, Attention and the handoff.";
             heading.append(priority);
         }
         card.append(heading, el("span", "card-body", conciseReviewText(item.id?.startsWith("package:") ? `${item.change} · Version ${packageVersionText(item)}` : item.body || item.reason || item.change || "")));
@@ -1188,22 +1239,26 @@ function renderCards(container, items, emptyText) {
         card.title = [item.title, item.body || item.reason].filter(Boolean).join("\n");
         card.addEventListener("click", () => openReviewItem(item));
         if (container === elements.attention) {
-            const closed = isFindingClosed(item, state.closedFindingKeys);
+            const hidden = isFindingClosed(item, state.closedFindingKeys);
+            const triage = concernTriage(item, state.reviewLedger);
+            const closed = hidden || isConcernSetAside(item, state.reviewLedger);
             const wrapper = el("div", `queue-item${closed ? " is-closed" : ""}`);
             wrapper.dataset.itemId = item.id;
             const layer = layerOf(layeredNavigation(), { path: concernPath(item) });
             if (layer) {
                 wrapper.dataset.layer = layer.id;
-                const chip = el("span", "layer-chip layer-chip-inline", layer.number ? String(layer.number) : "·");
+                const chip = layerMarker(layer, "layer-chip layer-chip-inline");
                 chip.title = layerLabel(layer);
                 heading.prepend(chip);
             }
-            const toggle = el("button", "queue-toggle", closed ? "Reopen" : "Close");
+            const toggle = el("button", "queue-toggle", hidden ? "Reopen" : "Close");
             toggle.type = "button";
-            toggle.setAttribute("aria-label", `${closed ? "Reopen" : "Close"} ${item.title || item.name}`);
+            toggle.setAttribute("aria-label", `${hidden ? "Reopen" : "Close"} ${item.title || item.name}`);
             toggle.addEventListener("click", () => toggleFinding(item));
-            if (closed) heading.append(el("span", "closed-label", "Closed"));
-            wrapper.append(card, toggle);
+            if (hidden) heading.append(el("span", "closed-label", "Closed"));
+            else if (triage) heading.append(el("span", "closed-label", reviewStateLabel(triage)));
+            // Set-aside concerns are already closed by their triage; change the triage to reopen them.
+            wrapper.append(card, ...(closed && !hidden ? [] : [toggle]));
             const impact = el("button", "link-button", "Impact");
             impact.type = "button";
             impact.setAttribute("aria-label", `Show impact of ${item.title || item.name}`);
@@ -1223,6 +1278,23 @@ function renderCards(container, items, emptyText) {
     }
     if (container === elements.attention) groupConcernsByLayer(container);
 }
+
+// One priority per concern everywhere (cards, strip, Attention, detail, handoff); cached per review state.
+function concernPriority(finding) {
+    const payload = state.payload;
+    const model = payload?.model;
+    if (!model) return finding.impact_score ?? null;
+    const key = `${payload.review_generation}:${payload.decision_map?.status || ""}:${payload.test_run?.finished_at || ""}:${payload.test_run?.status || ""}:${(payload.generated_observations || []).length}`;
+    if (state.priorityKey !== key) {
+        state.priorityKey = key;
+        state.priorityOf = concernPriorities(buildReviewPlan(model, payload.decision_map, payload.test_run,
+            [...groupFindings(model.attention || []), ...(payload.generated_observations || [])]));
+    }
+    return state.priorityOf(finding);
+}
+
+// Hidden in this browser, or triaged as an accepted risk or false positive.
+const concernClosed = (item) => isFindingClosed(item, state.closedFindingKeys) || isConcernSetAside(item, state.reviewLedger);
 
 function concernPath(item) {
     const model = state.payload?.model;
@@ -1389,15 +1461,26 @@ function flushReviewCursor() {
     persistReviewEntries(new Map(state.reviewLedger), stored, { quiet: true }).then((saved) => { if (saved) renderReviewOverview(); });
 }
 
-async function persistReviewEntries(entries, cursor = currentReviewCursor(), { quiet = false } = {}) {
+// Only decision saves show "Saving…" and lock the footer; reading-position saves happen silently in the background.
+function savingDecision() {
+    return state.progressSaving && !state.progressSavingBackground;
+}
+
+async function persistReviewEntries(entries, cursor = currentReviewCursor(), { quiet = false, background = false } = {}) {
+    // A background reading-position save never blocks a decision: wait for it to finish, then save the decision.
+    if (!background && state.progressSaving && state.progressSavingBackground) await state.progressSavePromise?.catch(() => {});
     if (!state.progressReady || state.progressSaving) {
+        if (background) return false;
         showError(new Error(state.progressSaving ? "Wait for the current review decision to save." : "Reload saved progress before recording a decision."));
         return false;
     }
     const key = state.reviewLedgerStorageKey;
     state.progressSaving = true;
+    state.progressSavingBackground = background;
+    let settle;
+    state.progressSavePromise = new Promise((resolve) => { settle = resolve; });
     state.progressError = null;
-    renderFileReview();
+    if (!background) renderFileReview();
     const save = (revision, values) => api("/api/review-progress", { method: "POST",
         body: JSON.stringify({ snapshot: key, revision, entries: Object.fromEntries(values), cursor }) });
     try {
@@ -1420,6 +1503,14 @@ async function persistReviewEntries(entries, cursor = currentReviewCursor(), { q
         state.progressRevision = record.revision;
         state.progressDurable = record.durable;
         state.savedReviewCursor = record.cursor;
+        if (record.github_viewed) {
+            state.githubViewed = record.github_viewed;
+            if (state.prReview?.viewed && !record.github_viewed.message) {
+                for (const [id, entry] of Object.entries(record.entries)) {
+                    if (id.startsWith("review-file:")) state.prReview.viewed[id.slice(12)] = entry.disposition === "reviewed";
+                }
+            }
+        } else state.githubViewed = null;
         cacheReviewLedger();
         if (!quiet) render();
         return true;
@@ -1430,7 +1521,11 @@ async function persistReviewEntries(entries, cursor = currentReviewCursor(), { q
         }
         return false;
     } finally {
-        if (state.reviewLedgerStorageKey === key) state.progressSaving = false;
+        if (state.reviewLedgerStorageKey === key) {
+            state.progressSaving = false;
+            state.progressSavingBackground = false;
+        }
+        settle();
         renderFileReview();
     }
 }
@@ -1515,8 +1610,10 @@ async function resumeReviewCursor(cursor) {
     state.exploring = false;
     state.mode = "walkthrough";
     state.activeReviewGroup = cursor.group;
-    await openSourceReference({ path: cursor.path, lines: [cursor.line], side: cursor.side },
+    const loaded = await openSourceReference({ path: cursor.path, lines: [cursor.line], side: cursor.side },
         { focus: true, tab: cursor.tab, nav: "reset" });
+    const generated = model.changes.find((file) => file.path === cursor.path)?.generated;
+    if (loaded && !generated && !["section", "package"].includes(state.selected?.kind)) ensureAnnotation(state.selected);
 }
 
 // Where this file sits and how big it is: "+56 −8 · file 2 of 3 in 2. Apply verified export corrections".
@@ -1538,7 +1635,8 @@ function renderSourcePosition(path) {
 }
 
 // The file "Mark … & next" will open, so the button can name its target.
-function nextFileLabel() {
+// The next reading-path entry after the open file, assuming the open file is marked as decided.
+function nextReviewEntry() {
     const source = state.source;
     if (!source) return null;
     const disposition = elements.file_review_disposition.value === "pending" ? "reviewed" : elements.file_review_disposition.value;
@@ -1546,7 +1644,110 @@ function nextFileLabel() {
     entries.set(fileReviewId(source.path), { disposition, path: source.path });
     const next = nextFileReview(fileReviewQueue(), entries,
         { path: source.path, group: state.navigationMode === "files" ? null : state.activeReviewGroup || null });
-    return next && next.path !== source.path ? next.path : null;
+    return next && next.path !== source.path ? next : null;
+}
+
+function nextFileLabel() {
+    return nextReviewEntry()?.path || null;
+}
+
+// Which explanation Agent Review shows when a reading-path entry opens: its first changed symbol, a priority's callable
+// or finding, or else the whole file. Mirrors openFileReview and openWorkspaceFile.
+function annotationIdForEntry(entry) {
+    const model = state.payload?.model;
+    // Which item opens depends on the reading-path groups; guessing before they load would prefetch the wrong one.
+    if (!model || !entry?.path || !state.sectionData) return null;
+    const file = entry.file || model.changes.find((change) => change.path === entry.path);
+    if (!file || file.generated) return null;
+    // Resuming a saved reading point reopens the exact item that was selected.
+    if (entry.resume) {
+        const id = entry.resume.item_id;
+        if (id?.startsWith("section:") || id?.startsWith("package:")) return null;
+        const known = id && [...model.nodes, ...(model.edges || []), ...(model.attention || []),
+            ...(state.payload.generated_observations || [])]
+            .some((item) => item.id === id && (!item.path || item.path === entry.path));
+        if (id && model.evidence?.[id]) return id;
+        return known ? id : `file:${entry.path}`;
+    }
+    const navigation = workspaceNavigation(model, state.sectionData);
+    const group = navigation.groups.find((item) => item.id === entry.group)
+        || navigation.groups.find((item) => item.files.some((candidate) => candidate.path === entry.path));
+    if (!group?.section) {
+        const priority = overviewPlan().find((item) => item.path === entry.path);
+        if (priority) return priority.kind === "package" ? null
+            : priority.kind === "callable" && priority.preferred ? priority.callable.id : (priority.finding || priority.node)?.id || null;
+    }
+    const range = group?.section?.ranges.find((item) => item.path === entry.path && item.side !== "base")
+        || group?.section?.ranges.find((item) => item.path === entry.path);
+    const node = range?.symbol_id && model.nodes.find((item) => item.id === range.symbol_id);
+    return node ? node.id : `file:${entry.path}`;
+}
+
+function requestAnnotation(item) {
+    const generation = state.payload.review_generation;
+    const key = `${generation}:${item.id}`;
+    const cached = state.payload.annotations?.[item.id];
+    if (cached) return Promise.resolve(cached);
+    if (state.annotationRequests.has(key)) return state.annotationRequests.get(key);
+    const promise = api("/api/annotation", { method: "POST",
+        body: JSON.stringify({ id: item.id, evidence_ids: item.evidence_ids || [] }) })
+        .then(({ annotation }) => {
+            if (state.payload?.review_generation === generation) {
+                state.payload.annotations ||= {};
+                state.payload.annotations[item.id] = annotation;
+            }
+            return annotation;
+        }).finally(() => {
+            if (state.annotationRequests.get(key) === promise) state.annotationRequests.delete(key);
+        });
+    state.annotationRequests.set(key, promise);
+    return promise;
+}
+
+function renderPrefetchStatus() {
+    const status = state.prefetchStatus;
+    for (const panel of [elements.overview_prefetch, elements.workspace_prefetch]) {
+        panel.replaceChildren();
+        panel.classList.toggle("hidden", !status);
+        if (!status) continue;
+        if (status.error) panel.append(el("p", "muted", `Could not prepare ${status.path.split("/").at(-1)}. Open the file to retry. ${status.error}`));
+        else panel.append(activityPlaceholder(`Preparing next explanation: ${status.path.split("/").at(-1)}`, 1));
+    }
+}
+
+// Share the request with a click that arrives before prefetch finishes; retain the result even after navigating away.
+function prefetchAnnotation(entry) {
+    const id = annotationIdForEntry(entry);
+    const payload = state.payload;
+    if (!id || payload?.annotations?.[id] || payload?.loading) return;
+    state.prefetchedAnnotations ||= new Set();
+    const key = `${payload.review_generation}:${id}`;
+    if (state.prefetchedAnnotations.has(key)) return;
+    state.prefetchedAnnotations.add(key);
+    const status = { id, path: entry.path };
+    state.prefetchStatus = status;
+    renderPrefetchStatus();
+    requestAnnotation({ id }).then(() => {
+        if (state.prefetchStatus === status) state.prefetchStatus = null;
+    }, (error) => {
+        if (state.prefetchStatus === status) status.error = error.message;
+    }).finally(() => {
+        if (state.payload?.review_generation === payload.review_generation) renderPrefetchStatus();
+    });
+}
+
+// Prefetch the next item shortly after a file settles, so the open file's own explanation goes first and skimming
+// through files quickly does not start a generation for each one.
+function schedulePrefetchNext() {
+    clearTimeout(state.prefetchTimer);
+    const path = state.source?.path;
+    if (!path || state.reviewPage !== "review") return;
+    state.prefetchTimer = setTimeout(() => {
+        if (state.source?.path !== path || state.reviewPage !== "review") return;
+        // Still opening: check again once the file has settled.
+        if (state.pendingSource) { schedulePrefetchNext(); return; }
+        prefetchAnnotation(nextReviewEntry());
+    }, 1200);
 }
 
 function renderFileReview() {
@@ -1564,7 +1765,7 @@ function renderFileReview() {
         elements.file_review_note.value = record.note || "";
     }
     // A decision can only apply to a file whose source has finished loading.
-    const disabled = !state.progressReady || state.progressSaving || Boolean(state.pendingSource);
+    const disabled = !state.progressReady || savingDecision() || Boolean(state.pendingSource) || Boolean(state.advancing);
     for (const element of [elements.file_review_disposition, elements.file_review_note, elements.file_review_save, elements.file_review_next]) element.disabled = Boolean(disabled);
     const verb = elements.file_review_disposition.value === "pending" ? "Mark reviewed"
         : elements.file_review_disposition.value === "follow-up" ? "Save follow-up" : "Save";
@@ -1573,11 +1774,16 @@ function renderFileReview() {
         : target ? `${verb} & next: ${target.split("/").at(-1)}` : `${verb} & finish`;
     elements.file_review_next.title = target ? `Then opens ${target} (M)` : target === null ? "Then opens the review summary (M)" : "Save and open the next file (M)";
     elements.file_review_status.textContent = state.progressError ? `Not saved: ${state.progressError}`
-        : state.progressLoading ? "Restoring session progress…" : state.progressSaving ? "Saving…"
+        : state.progressLoading ? "Restoring session progress…" : savingDecision() ? "Saving…"
             : state.fileReviewDrafts.has(key) ? "Unsaved whole-file decision"
             : state.progressDurable ? "Saved" : "Memory-only progress";
+    // On a pull request, report whether GitHub's "Viewed" checkbox followed the last decision on this file.
+    const viewedSync = state.githubViewed;
+    if (viewedSync && (viewedSync.paths || []).includes(state.source?.path) && !state.progressError && !savingDecision() && !state.fileReviewDrafts.has(key)) {
+        elements.file_review_status.textContent = viewedSync.message ? `Saved · ${viewedSync.message}` : "Saved · Viewed on GitHub updated";
+    }
     elements.file_review_status.title = state.progressDurable ? "Progress is saved in this session workspace" : "Progress is memory-only until this provider closes";
-    elements.file_review_status.dataset.quiet = String(!state.progressError && !state.progressLoading && !state.progressSaving
+    elements.file_review_status.dataset.quiet = String(!state.progressError && !state.progressLoading && !savingDecision()
         && !state.fileReviewDrafts.has(key) && Boolean(state.progressDurable));
     elements.file_review_retry.classList.toggle("hidden", !state.progressError);
 }
@@ -1593,22 +1799,28 @@ elements.file_review_disposition.addEventListener("change", keepFileDraft);
 elements.file_review_note.addEventListener("input", keepFileDraft);
 async function saveCurrentFile(advance) {
     const source = state.source;
-    if (!source || state.pendingSource) return;
+    if (!source || state.pendingSource || state.advancing) return;
     const path = source.path;
     const key = `${state.reviewLedgerStorageKey}:${path}`;
     const disposition = advance && elements.file_review_disposition.value === "pending" ? "reviewed" : elements.file_review_disposition.value;
     const entries = new Map(state.reviewLedger);
     entries.set(fileReviewId(path), { disposition, note: elements.file_review_note.value.trim(), path,
         line: currentReviewCursor()?.line || 1, updated_at: new Date().toISOString() });
-    if (!await persistReviewEntries(entries)) return;
-    state.fileReviewDrafts.delete(key);
-    elements.file_review_form.dataset.key = "";
-    renderFileReview();
-    if (advance) {
-        const next = await nextFileFromRail(
-            { path, group: state.navigationMode === "files" ? null : state.activeReviewGroup || null });
-        if (!next || (next.path === path && disposition !== "pending")) openFinishReview();
-        else await openFileReview(next);
+    // One Mark & next at a time: the next file must have opened and stayed on screen briefly before it can be marked.
+    if (advance) state.advancing = true;
+    try {
+        if (!await persistReviewEntries(entries)) return;
+        state.fileReviewDrafts.delete(key);
+        elements.file_review_form.dataset.key = "";
+        renderFileReview();
+        if (advance) {
+            const next = await nextFileFromRail(
+                { path, group: state.navigationMode === "files" ? null : state.activeReviewGroup || null });
+            if (!next || (next.path === path && disposition !== "pending")) openFinishReview();
+            else await openFileReview(next);
+        }
+    } finally {
+        if (advance) setTimeout(() => { state.advancing = false; renderFileReview(); }, 350);
     }
 }
 elements.file_review_save.addEventListener("click", () => saveCurrentFile(false).catch(showError));
@@ -1662,7 +1874,7 @@ function renderFinishReview() {
     const next = overviewDestination();
     if (next) {
         const layer = layerOf(navigation, next);
-        const button = el("button", "review-next", `Continue at ${layer && navigation.layers.length > 1 ? `${layerLabel(layer)} › ` : ""}${next.path.split("/").at(-1)}${next.line ? `:${next.line}` : ""}`);
+        const button = el("button", "review-next", `Continue at ${layer ? `${layerLabel(layer)} › ` : ""}${next.path.split("/").at(-1)}${next.line ? `:${next.line}` : ""}`);
         button.type = "button";
         button.title = `Opens ${next.path}`;
         button.addEventListener("click", () => openOverviewDestination(next).catch(showError));
@@ -1676,8 +1888,10 @@ function renderFinishReview() {
             const row = el("button", `overview-layer${layer.supporting ? " is-supporting" : ""}`);
             row.type = "button";
             const name = layerHeading(layer, { path: false });
-            row.append(el("span", "overview-layer-number", layer.number ? String(layer.number) : "·"), name,
-                el("span", "overview-layer-progress", `${progress.reviewed}/${progress.total} reviewed`));
+            const progressCell = el("span", "overview-layer-progress", `${progress.reviewed}/${progress.total} reviewed`);
+            const tests = layerTestChip(layer);
+            if (tests) progressCell.append(tests);
+            row.append(layerMarker(layer, "overview-layer-number"), name, progressCell);
             row.addEventListener("click", () => openLayer(navigation, layer));
             const item = el("li", "");
             item.append(row);
@@ -1685,16 +1899,25 @@ function renderFinishReview() {
         }
         panel.append(layers);
     }
-    const legacy = [...state.reviewLedger].filter(([id]) => !id.startsWith("review-file:"));
+    const legacy = [...state.reviewLedger].filter(([id, entry]) => !id.startsWith("review-file:") && entry.disposition !== "pending");
     const triagedFollowUp = legacy.filter(([, entry]) => entry.disposition === "follow-up").length;
     if (legacy.length) panel.append(el("p", "muted", `${countLabel(legacy.length, "concern")} triaged${
-        triagedFollowUp ? ` (${triagedFollowUp} need follow-up)` : ""}. Triage explains a concern but does not mark files reviewed.`));
+        triagedFollowUp ? ` (${triagedFollowUp} ${plural(triagedFollowUp, "needs", "need")} follow-up)` : ""}. Triage explains a concern but does not mark files reviewed.`));
     const findings = groupFindings(model.attention || []);
-    panel.append(el("p", "", `${countLabel(findings.filter((item) => !isFindingClosed(item, state.closedFindingKeys)).length, "active concern")} remain in the saved findings.`));
+    const activeCount = findings.filter((item) => !concernClosed(item)).length;
+    const setAside = findings.filter((item) => !isFindingClosed(item, state.closedFindingKeys) && isConcernSetAside(item, state.reviewLedger)).length;
+    panel.append(el("p", "", `${countLabel(activeCount, "active concern")} ${plural(activeCount, "remains", "remain")}${
+        setAside ? ` · ${countLabel(setAside, "concern")} set aside as accepted risk or false positive` : ""}.`));
     const tests = state.payload.test_run;
-    panel.append(el("p", "muted", tests?.status === "complete"
-        ? `Linked-test run completed: ${tests.counts?.passed || 0} passed, ${tests.counts?.failed || 0} failed. This is separate from human review.`
-        : "No completed linked-test run is recorded for this view. Coverage and AI analysis retain their own evidence limits."));
+    const distinctTests = new Set((tests?.tests || []).map((test) => baseTestId(test.id))).size;
+    const caseNote = (tests?.tests || []).length > distinctTests ? ` (results across ${countLabel(distinctTests, "linked test")}; each parametrized case is a result)` : "";
+    panel.append(el("p", "muted", tests?.tests?.length && ["complete", "running"].includes(tests.status)
+        ? `Linked-test results so far: ${tests.counts?.passed || 0} passed, ${(tests.counts?.failed || 0) + (tests.counts?.error || 0)} failed${
+            tests.counts?.skipped ? `, ${tests.counts.skipped} skipped` : ""}${caseNote}${
+            tests.status === "running" ? "; a run is in progress" : ""}. Each layer's outcome is shown beside it. This is separate from human review.`
+        : tests?.status === "complete"
+            ? `Linked-test run completed: ${tests.counts?.passed || 0} passed, ${tests.counts?.failed || 0} failed. This is separate from human review.`
+            : "No completed linked-test run is recorded for this view. Coverage and AI analysis retain their own evidence limits."));
     const list = el("div", "finish-files");
     const fileButton = (file, group) => {
         const record = state.reviewLedger.get(fileReviewId(file.path));
@@ -1712,9 +1935,19 @@ function renderFinishReview() {
     const details = el("details", "");
     details.append(el("summary", "", "All file decisions"), list);
     panel.append(details);
-    const handoff = el("button", next ? "review-next review-secondary" : "review-next", "Preview / export handoff");
+    const pr = state.prReview;
+    const drafted = pr?.drafts?.comments?.length || 0;
+    if (pr?.available) {
+        const files = (model.changes || []).filter((file) => file.status !== "unchanged");
+        const viewed = files.filter((file) => pr.viewed?.[file.path]).length;
+        panel.append(el("p", "", `Pull request: ${countLabel(drafted, "draft line comment")} ready to post · ${viewed} of ${countLabel(files.length, "file")} marked Viewed on GitHub${
+            pr.threads?.length ? ` · ${countLabel(pr.threads.filter((thread) => !thread.reply_to).length, "existing thread")}` : ""}.`));
+        if (pr.github_error) panel.append(el("p", "error", pr.github_error));
+        if (pr.head_matches === false) panel.append(el("p", "error", `The pull request has newer commits (${String(pr.head || "").slice(0, 7)}) than this review. Re-open it in Agent Review before posting; nothing can be posted from this snapshot.`));
+    } else if (drafted) panel.append(el("p", "muted", `${countLabel(drafted, "line comment")} drafted; they are included in the handoff summary.`));
+    const handoff = el("button", next ? "review-next review-secondary" : "review-next", pr?.available ? "Review & submit to pull request" : "Preview / export handoff");
     handoff.type = "button";
-    handoff.disabled = !state.progressReady || state.progressSaving;
+    handoff.disabled = !state.progressReady || savingDecision();
     handoff.addEventListener("click", () => openReviewHandoff());
     panel.append(handoff);
 }
@@ -1763,15 +1996,28 @@ async function openReviewHandoff() {
         elements.handoff_markdown_save.disabled = false;
         elements.handoff_state_save.disabled = false;
         elements.handoff_provider.replaceChildren();
+        // Only a GitHub pull request can receive a review; other targets export locally.
+        elements.handoff_provider_section.classList.toggle("hidden", !preview.provider.url && !preview.provider.pending);
         if (preview.provider.url) {
             const link = el("a", "", preview.provider.url);
             link.href = preview.provider.url;
             link.target = "_blank";
             link.rel = "noopener noreferrer";
-            elements.handoff_provider.append("Destination: ", link, ` · Commit ${preview.provider.commit}. Uses the gh CLI's existing authorization.`);
+            elements.handoff_provider.append("Destination: ", link, ` · Commit ${String(preview.provider.commit || "").slice(0, 12)} · ${
+                countLabel(preview.provider.comments || 0, "line comment")} ${preview.provider.available ? "will be posted with this summary. Uses the gh CLI's existing authorization." : "drafted."}`);
         }
+        elements.handoff_summary.disabled = !preview.provider.available;
+        elements.handoff_verdict.disabled = !preview.provider.available;
+        // GitHub does not allow approving or requesting changes on your own pull request.
+        for (const input of elements.handoff_verdict.querySelectorAll("input")) {
+            const blocked = input.value !== "COMMENT" && preview.provider.own;
+            input.disabled = blocked;
+            input.closest("label").title = blocked ? "GitHub does not allow approving or requesting changes on your own pull request." : "";
+            if (blocked && input.checked) elements.handoff_verdict.querySelector("input[value='COMMENT']").checked = true;
+        }
+        renderHandoffConsent();
         elements.handoff_provider_status.textContent = preview.provider.available
-            ? "No review has been sent from this preview." : preview.provider.reason;
+            ? `No review has been sent from this preview.${preview.provider.own ? " This is your own pull request, so only Comment is available." : ""}` : preview.provider.reason;
         elements.handoff_confirm.disabled = !preview.provider.available;
     } catch (error) {
         if (epoch === state.handoffEpoch && elements.review_handoff.open) {
@@ -1816,8 +2062,9 @@ elements.handoff_import_file.addEventListener("change", async () => {
             body: JSON.stringify({ artifact, revision: current.revision, confirm: false }) });
         if (epoch !== state.handoffEpoch || sequence !== state.handoffImportEpoch || !elements.review_handoff.open) return;
         state.handoffImport = { artifact, revision: preview.revision };
-        elements.handoff_import_preview.textContent = `${preview.repository}: ${countLabel(preview.records, "record")} · ${preview.message}`;
-        elements.handoff_import_confirm.disabled = false;
+        elements.handoff_import_preview.textContent = `${preview.repository}: ${countLabel(preview.records, "record")} · ${
+            preview.changes ? `${countLabel(preview.changes, "decision")} would change` : "nothing would change"} · ${preview.message}`;
+        elements.handoff_import_confirm.disabled = !preview.changes;
     } catch (error) {
         if (epoch === state.handoffEpoch && sequence === state.handoffImportEpoch && elements.review_handoff.open) {
             elements.handoff_import_preview.textContent = "Import not ready. Nothing was imported.";
@@ -1831,10 +2078,14 @@ elements.handoff_import_confirm.addEventListener("click", async () => {
     elements.handoff_import_error.classList.add("hidden");
     try {
         if (!state.handoffImport) throw new Error("Preview an exact matching state file before confirming import.");
-        await api("/api/review-handoff/import", { method: "POST",
+        const result = await api("/api/review-handoff/import", { method: "POST",
             body: JSON.stringify({ ...state.handoffImport, confirm: true }) });
-        elements.handoff_import_preview.textContent = "Decisions imported and saved in this session workspace.";
         state.handoffImport = null;
+        if (result.unchanged) {
+            elements.handoff_import_preview.textContent = "No decisions changed; nothing was saved.";
+            return;
+        }
+        elements.handoff_import_preview.textContent = `${countLabel(result.changes || 0, "decision")} imported and saved in this session workspace.`;
         loadReviewLedger(state.payload.model, { force: true });
         state.handoff = null;
         elements.handoff_markdown_save.disabled = true;
@@ -1851,6 +2102,24 @@ elements.handoff_import_confirm.addEventListener("click", async () => {
 elements.handoff_confirm.addEventListener("change", () => {
     elements.handoff_submit.disabled = !state.handoff?.provider.available || !elements.handoff_confirm.checked;
 });
+const VERDICT_LABELS = { COMMENT: "comment", APPROVE: "approval", REQUEST_CHANGES: "request for changes" };
+const VERDICT_ARTICLES = { COMMENT: "a comment", APPROVE: "an approval", REQUEST_CHANGES: "a request for changes" };
+const handoffVerdict = () => elements.handoff_verdict.querySelector("input:checked")?.value || "COMMENT";
+// Consent names the exact verdict; changing the verdict requires confirming again.
+function renderHandoffConsent() {
+    const verdict = handoffVerdict();
+    const comments = state.handoff?.provider?.comments || 0;
+    elements.handoff_confirm_text.textContent = `I reviewed this summary${comments ? ` and ${countLabel(comments, "line comment")}` : ""} and choose to post ${comments ? "them" : "it"} as ${
+        VERDICT_ARTICLES[verdict]} under my GitHub identity.`;
+    elements.handoff_submit.textContent = { COMMENT: "Submit comment", APPROVE: "Submit approval", REQUEST_CHANGES: "Request changes" }[verdict];
+    elements.handoff_submit.classList.toggle("handoff-danger", verdict === "REQUEST_CHANGES");
+    elements.handoff_submit.classList.toggle("handoff-primary", verdict !== "REQUEST_CHANGES");
+}
+elements.handoff_verdict.addEventListener("change", () => {
+    elements.handoff_confirm.checked = false;
+    elements.handoff_submit.disabled = true;
+    renderHandoffConsent();
+});
 function handoffProviderStatus(message) {
     elements.handoff_status.textContent = message;
     elements.handoff_provider_status.textContent = message;
@@ -1864,11 +2133,29 @@ elements.handoff_submit.addEventListener("click", async () => {
     elements.handoff_refresh.disabled = true;
     elements.handoff_error.classList.add("hidden");
     elements.handoff_provider_error.classList.add("hidden");
-    handoffProviderStatus("Submitting the exact comment-only review. Waiting for the provider receipt; do not submit again.");
+    const verdict = handoffVerdict();
+    handoffProviderStatus(`Submitting the ${VERDICT_LABELS[verdict]}. Waiting for GitHub's receipt; do not submit again.`);
     try {
         const receipt = await api("/api/review-handoff/submit", { method: "POST",
-            body: JSON.stringify({ token: state.handoff?.token, confirm: elements.handoff_confirm.checked }) });
-        if (epoch === state.handoffEpoch) handoffProviderStatus(`Submitted comment-only review ${receipt.id} on commit ${receipt.commit}. No approval or change request was submitted.`);
+            body: JSON.stringify({ token: state.handoff?.token, confirm: elements.handoff_confirm.checked, event: verdict, summary: elements.handoff_summary.value }) });
+        if (epoch === state.handoffEpoch) {
+            // The preview is consumed: the destination line no longer promises a pending post.
+            const destination = elements.handoff_provider.querySelector("a");
+            elements.handoff_provider.replaceChildren(...(destination ? ["Destination: ", destination] : []),
+                ` · Commit ${String(receipt.commit || "").slice(0, 12)} · review posted.`);
+            elements.handoff_confirm.checked = false;
+            elements.handoff_summary.value = "";
+            handoffProviderStatus(`Posted ${VERDICT_LABELS[verdict]} on commit ${String(receipt.commit || "").slice(0, 12)}${
+                receipt.comments ? ` with ${countLabel(receipt.comments, "line comment")}` : ""}.${receipt.drafts_warning ? ` ${receipt.drafts_warning}` : ""}`);
+            if (receipt.url) {
+                const link = el("a", "", "Open the review on GitHub");
+                link.href = receipt.url;
+                link.target = "_blank";
+                link.rel = "noopener noreferrer";
+                elements.handoff_provider_status.append(" ", link);
+            }
+            loadPrReview({ force: true });
+        }
     } catch (error) {
         if (epoch === state.handoffEpoch) {
             handoffProviderStatus("No submission receipt. Read the error and check the PR before preparing another submission.");
@@ -1885,7 +2172,7 @@ function queueReviewCursor() {
         if (snapshot !== state.reviewLedgerStorageKey || state.progressSaving || !state.source) return;
         const cursor = currentReviewCursor();
         if (JSON.stringify(cursor) === JSON.stringify(state.savedReviewCursor)) return;
-        persistReviewEntries(new Map(state.reviewLedger), cursor, { quiet: true });
+        persistReviewEntries(new Map(state.reviewLedger), cursor, { quiet: true, background: true });
     }, 800);
 }
 elements.source.addEventListener("scroll", () => { sourceScrollPosition(); queueReviewCursor(); }, { passive: true });
@@ -1948,7 +2235,7 @@ function renderImpact(model, focus = null) {
         direction.append(option);
     }
     direction.addEventListener("change", () => { state.impact.direction = direction.value; renderImpact(model, "direction"); });
-    const expand = el("button", "", `Expand one step (${options.depth || 1}/4)`);
+    const expand = el("button", "btn", `Expand one step (${options.depth || 1}/4)`);
     expand.type = "button";
     expand.disabled = options.depth >= 4 || !slice.boundary;
     expand.addEventListener("click", () => { state.impact.depth++; renderImpact(model, "expand"); });
@@ -1980,20 +2267,22 @@ function renderImpact(model, focus = null) {
             evidence.append(el("p", "", `${source?.name || edge.source} ${edge.change === "removed" ? `formerly ${edge.type} (base snapshot)` : edge.type} ${target?.name || edge.target} · relationship confidence: ${edge.confidence || "not reported"}`));
             for (const id of edge.evidence_ids || []) if (model.evidence?.[id]) evidence.append(evidenceButton(id));
         }
+        const actions = el("div", "impact-actions");
         if (item.path) {
-            const open = el("button", "", "Open source");
+            const open = el("button", "btn", "Open source");
             open.type = "button";
             open.addEventListener("click", () => {
                 state.sourceReturnFocus = [...elements.graph.querySelectorAll(".impact-graph .node")]
                     .find((node) => node.dataset.nodeId === item.id);
                 selectItem(item, false);
             });
-            evidence.append(open);
+            actions.append(open);
         }
-        const ask = el("button", "", "Ask about this");
+        const ask = el("button", "btn", "Ask about this");
         ask.type = "button";
         ask.addEventListener("click", () => discussItem(item).catch(showError));
-        evidence.append(ask);
+        actions.append(ask);
+        evidence.append(actions);
         if (item.impact_role === "Related test") evidence.append(el("p", "muted", "Static test relationship. Execution of this affected behavior is not established by this graph."));
         elements.detail.append(evidence);
     }, { viewport: true, focusId: options.seed,
@@ -2108,7 +2397,7 @@ function renderSections(model) {
     const data = ensureSectionData();
     if (!data) {
         if (state.sectionError?.key === key) {
-            const retry = el("button", "", "Retry sections");
+            const retry = el("button", "btn", "Retry sections");
             retry.type = "button";
             retry.addEventListener("click", () => { state.sectionError = null; render(); });
             elements.graph.append(el("p", "error", state.sectionError.message), retry);
@@ -2167,7 +2456,7 @@ function renderSections(model) {
         });
         const summary = el("summary", "");
         if (layer) {
-            const chip = el("span", "layer-chip layer-chip-inline", layer.number ? String(layer.number) : "·");
+            const chip = layerMarker(layer, "layer-chip layer-chip-inline");
             chip.title = layerLabel(layer);
             summary.append(chip);
         }
@@ -2311,17 +2600,19 @@ function collapseSizeFindings(items, model) {
         return `${(node?.name || "unit").split(".").pop()} ${lines}`;
     };
     const shown = sizes.slice(0, 4).map(label).join(" · ");
+    // A grouped card carries its highest member priority, matching the handoff's grouped line.
+    const top = Math.max(...sizes.map((item) => concernPriority(item) ?? -1));
     const group = {
         id: "group:size",
         title: `Large changes · ${countLabel(sizes.length, "area")}`,
         body: `${shown}${sizes.length > 4 ? ` · +${sizes.length - 4} more` : ""}`,
-        impact_score: sizes[0].impact_score,
+        impact_score: top >= 0 ? top : null,
         severity: sizes[0].severity,
         collect_mode: "areas",
         members: sizes,
     };
     const rest = items.filter((item) => !sizes.includes(item));
-    const position = rest.findIndex((item) => (item.impact_score || 0) < (group.impact_score || 0));
+    const position = rest.findIndex((item) => (concernPriority(item) ?? 0) < (group.impact_score ?? 0));
     rest.splice(position === -1 ? rest.length : position, 0, group);
     return rest;
 }
@@ -2530,6 +2821,23 @@ function layerOf(navigation, entry) {
 const layerTitle = (layer) => layer ? state.payload?.annotations?.layers?.titles?.[layer.id] || layer.name : "";
 const layerLabel = (layer) => layer ? `${layer.number ? `${layer.number}. ` : ""}${layerTitle(layer)}` : "";
 
+// Numbered layers show their step number in a circle. Supporting files are outside the reading order, so they show a
+// folder (GitHub's file-directory octicon) instead of an empty-looking circle.
+function layerMarker(layer, className) {
+    if (layer?.number) return el("span", className, String(layer.number));
+    const marker = el("span", `${className} is-unnumbered`);
+    marker.title = "Supporting files: outside the numbered reading order";
+    marker.setAttribute("aria-label", "Supporting files");
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 16 16");
+    svg.setAttribute("aria-hidden", "true");
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", "M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2C6.07 1.26 5.55 1 5 1H1.75ZM1.5 2.75a.25.25 0 0 1 .25-.25H5a.25.25 0 0 1 .2.1l.9 1.2c.33.44.85.7 1.4.7h6.75a.25.25 0 0 1 .25.25v8.5a.25.25 0 0 1-.25.25H1.75a.25.25 0 0 1-.25-.25V2.75Z");
+    svg.append(path);
+    marker.append(svg);
+    return marker;
+}
+
 function dependencyLabel(navigation, dependency) {
     const layer = navigation?.layers.find((item) => item.number === dependency.number);
     return layer ? layerLabel(layer) : `${dependency.number}. ${dependency.name}`;
@@ -2588,7 +2896,7 @@ function renderOverviewLayers(navigation) {
         const row = el("button", `overview-layer${layer.supporting ? " is-supporting" : ""}`);
         row.type = "button";
         const name = layerHeading(layer);
-        row.append(el("span", "overview-layer-number", layer.number ? String(layer.number) : "·"), name,
+        row.append(layerMarker(layer, "overview-layer-number"), name,
             el("span", "overview-layer-progress", `${progress.reviewed}/${progress.total} reviewed`));
         const intent = state.payload.annotations?.layers?.intents?.[layer.id];
         const details = [];
@@ -2603,6 +2911,7 @@ function renderOverviewLayers(navigation) {
         else if (layer.summary) detail.append(document.createTextNode(layer.summary));
         if (details.length) detail.append(document.createTextNode(`${intent || layer.summary ? " · " : ""}${details.join(" · ")}`));
         row.append(detail);
+        layerSummaryStatus(row, layer, `overview-layer:${layer.id}`);
         row.setAttribute("aria-label", `${layerLabel(layer)}: ${progress.reviewed} of ${progress.total} files reviewed. ${intent || layer.summary || ""}`);
         row.addEventListener("click", () => openLayer(navigation, layer));
         const item = el("li", "");
@@ -2636,6 +2945,11 @@ function renderReviewOverview() {
     elements.overview_title.textContent = target?.intent?.subject || target?.intent?.title
         || (target?.mode === "worktree" ? "Review your uncommitted changes" : target?.label || "Review this change");
     const overviewBody = payload.annotations?.overview?.body;
+    // Once the summary is on screen, Copilot starts on the first item the reader will open.
+    if ((overviewBody || state.overviewError) && state.reviewPage === "overview" && state.progressReady) {
+        const destination = overviewDestination();
+        if (destination) prefetchAnnotation(destination.resume ? destination : destination.entry || destination);
+    }
     const blurb = overviewBlurb(overviewBody);
     const fullBlurb = overviewBlurb(overviewBody, { full: true });
     elements.overview_description.replaceChildren();
@@ -2659,12 +2973,15 @@ function renderReviewOverview() {
             });
             (text.lastElementChild || text).append(document.createTextNode(" "), toggle);
         }
+    } else if (state.overviewLoading) {
+        elements.overview_description.append(aiPlaceholder("overview", "Copilot is preparing the overview. You can start reviewing the saved code now.", 3));
     } else {
-        elements.overview_description.append(el("p", "", state.overviewLoading
-            ? "The AI overview is being prepared. You can start with the saved code now."
-            : state.overviewError ? "The AI overview is unavailable. You can review the saved code now, or open change details to retry."
-                : "Review the saved changes and available evidence. Open change details for intent, metrics and AI summary status."));
+        elements.overview_description.append(el("p", "", state.overviewError
+            ? "The AI overview is unavailable. You can review the saved code now, or open change details to retry."
+            : "Review the saved changes and available evidence. Open change details for intent, metrics and AI summary status."));
     }
+    if (payload.annotations?.overview?.refining) elements.overview_description.append(
+        aiPlaceholder("overview-refine", "Copilot is refining this overview with deeper review evidence...", 2));
     elements.overview_progress.textContent = `${progress.reviewed} of ${countLabel(changed, "changed file")} reviewed${
         progress.followUp ? ` · ${countLabel(progress.followUp, "follow-up")}` : ""}`;
     elements.overview_scope.textContent = "";
@@ -2674,13 +2991,13 @@ function renderReviewOverview() {
         : "Review summary";
     elements.overview_start.title = next ? `Next changed file: ${next.path}` : "Review saved decisions and remaining concerns";
     const navigation = layeredNavigation();
-    renderOverviewLayers(navigation);
     if (navigation) ensureLayerSummaries();
+    renderOverviewLayers(navigation);
     const destination = overviewDestination();
     if (destination && navigation) {
         const layer = layerOf(navigation, destination);
         const verb = elements.overview_start.textContent === "Continue review" ? "Continue" : "Start review";
-        elements.overview_start.textContent = `${verb} · ${layer && navigation.layers.length > 1 ? `${layerLabel(layer)} › ` : ""}${destination.path.split("/").at(-1)}${destination.line ? `:${destination.line}` : ""}`;
+        elements.overview_start.textContent = `${verb} · ${layer ? `${layerLabel(layer)} › ` : ""}${destination.path.split("/").at(-1)}${destination.line ? `:${destination.line}` : ""}`;
         elements.overview_start.title = `Opens ${destination.path}${destination.line ? ` at line ${destination.line}` : ""}`;
     }
     const disabled = Boolean(payload.loading || payload.cancelled || state.connectionLost || state.progressLoading);
@@ -2757,7 +3074,7 @@ function alignFocusPoints(body) {
         items.sort((a, b) => (a.layer ? index.get(a.layer.id) : Infinity) - (b.layer ? index.get(b.layer.id) : Infinity) || a.position - b.position);
         for (const { item, layer } of items) {
             if (layer) {
-                const chip = el("span", "layer-chip layer-chip-inline", layer.number ? String(layer.number) : "·");
+                const chip = layerMarker(layer, "layer-chip layer-chip-inline");
                 chip.title = layerLabel(layer);
                 chip.setAttribute("aria-label", `Layer ${layerLabel(layer)}`);
                 item.prepend(chip);
@@ -2863,6 +3180,16 @@ function renderChangeBrief() {
     heading.append(el("h3", "", "Copilot change summary"));
     if (annotation?.body) heading.append(copyButton(annotation.body, "Copy summary"));
     panel.append(heading);
+    if (annotation?.body && (annotation.refining || annotation.basis || annotation.refine_error)) {
+        const status = el("p", `muted brief-ai-status${annotation.refining ? " is-refining" : ""}`,
+            annotation.refining ? "Quick summary from the saved code. Copilot is refining it with a deeper review of the change; it updates here when ready."
+                : annotation.refine_error ? `Quick summary from the saved code. Refining it with a deeper review failed: ${annotation.refine_error}`
+                : annotation.basis === "review" ? "Written from a deeper review of the change (the repository-rules and behavior pass)."
+                : "Written from the saved code.");
+        status.setAttribute("role", "status");
+        panel.append(status);
+        if (annotation.refining) panel.append(aiPlaceholder("overview-refine", "Copilot is refining the change summary...", 2));
+    }
     if (annotation?.body) {
         const body = revealOnce(el("div", "annotation-body brief-ai"), "overview");
         markdownContext.intent = state.briefIntent || null;
@@ -2938,6 +3265,7 @@ function appendInternalReview(container, review, scope, resume) {
     container.append(progress);
     const actions = el("div", "action-row");
     if (review.status === "running") {
+        container.append(aiPlaceholder(`review:${scope}`, "Copilot is reviewing the saved change...", 2));
         const cancel = el("button", "", "Stop AI review");
         cancel.type = "button";
         cancel.addEventListener("click", async () => {
@@ -3057,7 +3385,7 @@ function renderRuleCheck() {
     appendInternalReview(details, rules, "rules", () => api("/api/rule-check", {
         method: "POST", body: JSON.stringify({ force: false }),
     }));
-    if (rules.status === "running") details.append(aiPlaceholder("rule-check", "Copilot is checking the change against the repository rules…", 3));
+    if (rules.status === "running" && !rules.coverage) details.append(aiPlaceholder("rule-check", "Copilot is checking the change against the repository rules…", 3));
     if (rules.content) {
         markdownContext.subject = null;
         markdownContext.intent = null;
@@ -3068,7 +3396,7 @@ function renderRuleCheck() {
     }
     if (rules.error) {
         details.append(el("p", "error", rules.error));
-        const retry = el("button", "", "Run again");
+        const retry = el("button", "btn", "Run again");
         retry.type = "button";
         retry.addEventListener("click", async () => {
             retry.disabled = true;
@@ -3301,21 +3629,25 @@ async function selectItem(item, notify = true, annotate = true) {
 
 function ensureAnnotation(item, epoch = state.selectionEpoch) {
     if (epoch !== state.selectionEpoch || state.selected?.id !== item.id) return;
+    const generation = state.payload.review_generation;
     const cached = state.payload?.annotations?.[item.id];
     if (cached) {
+        if (state.prefetchStatus?.id === item.id) {
+            state.prefetchStatus = null;
+            renderPrefetchStatus();
+        }
         renderAnnotation(item, cached);
         return;
     }
     renderAnnotation(item, null, true);
-    api("/api/annotation", {
-        method: "POST",
-        body: JSON.stringify({ id: item.id, evidence_ids: item.evidence_ids || [] }),
-    })
-        .then(({ annotation }) => {
+    requestAnnotation(item)
+        .then((annotation) => {
             if (epoch === state.selectionEpoch && state.selected?.id === item.id) {
-                state.payload.annotations ||= {};
-                state.payload.annotations[item.id] = annotation;
                 renderAnnotation(item, annotation);
+            }
+            if (state.payload?.review_generation === generation && state.prefetchStatus?.id === item.id) {
+                state.prefetchStatus = null;
+                renderPrefetchStatus();
             }
         })
         .catch((error) => {
@@ -3485,7 +3817,7 @@ function appendInlineMarkdown(container, text, options = {}) {
             const reference = options.sourceReferences === false ? null : parseSourceReference(value);
             const symbol = options.sourceReferences === false || reference ? null : resolveSymbolReference(state.payload?.model, value, markdownContext.subject);
             if (reference) {
-                container.append(sourceReferenceButton(value, reference));
+                container.append(sourceReferenceButton(sourceReferenceLabel(reference), reference));
             } else if (symbol) {
                 container.append(sourceReferenceButton(value, {
                     path: symbol.path,
@@ -3516,6 +3848,17 @@ function intentLink(label, attribution) {
     button.addEventListener("click", () => openSessionHistory(attribution.original_prompt_event_id
         ? { ...attribution, prompt_event_id: attribution.original_prompt_event_id } : attribution));
     return button;
+}
+
+// Links show the repository-relative path and lines, whatever form the text used (absolute, backslashes, bare name).
+function sourceReferenceLabel(reference) {
+    const ranges = [];
+    for (const line of reference.lines || []) {
+        const last = ranges.at(-1);
+        if (last && line === last[1] + 1) last[1] = line;
+        else ranges.push([line, line]);
+    }
+    return `${reference.path}${ranges.length ? `:${ranges.map(([from, to]) => from === to ? from : `${from}-${to}`).join(",")}` : ""}`;
 }
 
 function sourceReferenceButton(label, reference, title = null) {
@@ -3552,12 +3895,12 @@ async function openSourceReference(reference, { focus = false, tab = reference.s
 }
 
 function appendTextWithSourceReferences(container, text) {
-    const pattern = /((?:[A-Za-z0-9_.-]+[\\/])*[A-Za-z0-9_.-]+\.(?:csproj|cs|slnx?|props|targets|py|toml|txt|json|ya?ml|md|[cm]?[jt]sx?|css|html)(?![A-Za-z0-9_])(?::\d+(?:-\d+)?(?:,\d+(?:-\d+)*)*)?)/g;
+    const pattern = /((?:[A-Za-z]:[\\/])?(?:[A-Za-z0-9_.-]+[\\/])*[A-Za-z0-9_.-]+\.(?:csproj|cs|slnx?|props|targets|py|toml|txt|json|ya?ml|md|[cm]?[jt]sx?|css|html)(?![A-Za-z0-9_])(?::\d+(?:-\d+)?(?:,\d+(?:-\d+)*)*)?)/g;
     let offset = 0;
     for (const match of text.matchAll(pattern)) {
         if (match.index > offset) container.append(document.createTextNode(text.slice(offset, match.index)));
         const reference = parseSourceReference(match[0]);
-        container.append(reference ? sourceReferenceButton(match[0], reference) : document.createTextNode(match[0]));
+        container.append(reference ? sourceReferenceButton(sourceReferenceLabel(reference), reference) : document.createTextNode(match[0]));
         offset = match.index + match[0].length;
     }
     if (offset < text.length) container.append(document.createTextNode(text.slice(offset)));
@@ -3813,7 +4156,7 @@ function renderDetail(item) {
     panel.append(top);
     const metrics = item.metrics || {};
     const fields = [
-        field("Impact score", item.impact_score),
+        field("Static priority", item.impact_score != null || item.node_id || item.package_id ? concernPriority(item) : null),
         field("Change", item.change),
         field("Path", item.path),
         field("Lines", item.start_line ? `${item.start_line}–${item.end_line || item.start_line}` : null),
@@ -3906,7 +4249,7 @@ function renderSourceStrip() {
     const parts = [];
     if (risk) {
         toggle.append(el("strong", "source-strip-title", risk.title));
-        parts.push(el("span", "source-strip-score", `Static priority ${risk.score}`));
+        parts.push(el("span", "source-strip-score", `Static priority ${risk.score}/100`));
         if (risk.reason) parts.push(el("span", "source-strip-reason", risk.reason));
         if (risk.triage) parts.push(el("span", "source-strip-triage", `Triage: ${risk.triage}`));
     }
@@ -4361,7 +4704,8 @@ async function renderSource({ preserveScroll = false } = {}) {
     lines.classList.toggle("old-lines-only", oldNumbers && !newNumbers);
     const largestLine = rows.reduce((largest, row) =>
         Math.max(largest, Number(row.dataset?.oldLine) || 0, Number(row.dataset?.newLine) || 0), 0);
-    lines.style.setProperty("--source-line-digits", String(Math.max(2, String(largestLine).length)));
+    lines.dataset.lineDigits = String(Math.max(2, String(largestLine).length));
+    lines.style.setProperty("--source-line-digits", lines.dataset.lineDigits);
     lines.classList.toggle("split-diff", splitRendering);
     if (!reused) {
         const units = splitRendering ? splitDiffUnits(rows) : rows;
@@ -4397,11 +4741,14 @@ async function renderSource({ preserveScroll = false } = {}) {
     if (elements.source.firstElementChild !== lines) elements.source.replaceChildren(lines);
     elements.source.removeAttribute("aria-busy");
     renderChangeRuler(rows);
+    renderSourceComments();
     const annotation = state.payload?.annotations?.[state.selected?.id];
     const selectedPath = state.selected?.path || state.payload?.model?.nodes?.find((node) =>
         node.id === (state.selected?.node_id || state.selected?.id))?.path;
     if (annotation && selectedPath === state.source.path) renderAnnotation(state.selected, annotation);
-    else if (!renderSectionEvidence()) elements.source_annotation.classList.add("hidden");
+    else if (selectedPath === state.source.path && state.annotationRequests.has(`${state.payload.review_generation}:${state.selected?.id}`)) {
+        renderAnnotation(state.selected, null, true);
+    } else if (!renderSectionEvidence()) elements.source_annotation.classList.add("hidden");
     renderSourceRisk();
     renderSourceCoverage();
     renderSourceDecisions();
@@ -4409,6 +4756,7 @@ async function renderSource({ preserveScroll = false } = {}) {
     document.querySelectorAll(".tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.tab === state.sourceTab));
     renderSourceNavigation();
     renderFileReview();
+    schedulePrefetchNext();
     if (preserveScroll) {
         elements.source.scrollTop = previousScroll.top;
         elements.source.scrollLeft = previousScroll.left;
@@ -4421,6 +4769,546 @@ async function renderSource({ preserveScroll = false } = {}) {
     queueReviewCursor();
     return true;
 }
+
+// ---- Per-layer verification: run the linked tests of the layer being read, beside the code ----
+
+const layerPaths = (layer) => [...new Set(layer.groups.flatMap((group) => group.files.map((file) => file.path)))];
+// The deterministic area name labels runs, so the run history reads the same before and after AI step titles load.
+const layerScope = (layer) => ({ id: layer.id, name: layer.name, number: layer.number || null, paths: layerPaths(layer) });
+const layerTests = (layer) => layerTestStatus(state.payload?.decision_map, state.payload?.test_run, layerPaths(layer));
+
+function currentReadingLayer() {
+    const navigation = state.workspaceNavigation;
+    return state.source && navigation ? layerOf(navigation, { path: state.source.path }) : null;
+}
+
+function layerPlanFor(layer) {
+    const payload = state.payload;
+    const key = [payload?.review_generation, Boolean(payload?.worktree_changed), payload?.decision_map?.status, payload?.decision_map?.total_ms, layer.id].join(":");
+    state.layerPlans ||= new Map();
+    const cached = state.layerPlans.get(key);
+    if (cached) return cached.plan;
+    state.layerPlans.set(key, { plan: null });
+    api("/api/test-run/plan", { method: "POST", body: JSON.stringify({ layer: layerScope(layer) }) })
+        .then((plan) => { state.layerPlans.set(key, { plan }); renderReviewContext(); })
+        .catch((error) => { state.layerPlans.set(key, { plan: { available: false, reason: error.message } }); renderReviewContext(); });
+    return null;
+}
+
+function layerTestSummary(status) {
+    if (status.state === "running") return `${countLabel(status.linked, "linked test")} · running${
+        status.ran ? ` (before this run: ${layerTestSummary({ ...status, state: status.outcome })})` : ""}`;
+    if (status.state === "not-run") return `${countLabel(status.linked, "linked test")} · not run`;
+    const parts = ["passed", "failed", "error", "skipped"].filter((key) => status.counts[key]).map((key) => `${status.counts[key]} ${key}`);
+    if (status.counts.not_run) parts.push(`${status.counts.not_run} not run`);
+    return `${parts.join(" · ")}${status.stale ? " · stale" : ""}`;
+}
+
+// A compact status chip for rails and lists; nothing when the layer has no linked tests. Only fresh, all-passing results get a ✓.
+function layerTestChip(layer) {
+    const status = layerTests(layer);
+    if (!["running", "not-run", "passed", "failing", "partial", "skipped"].includes(status.state)) return null;
+    const kind = status.stale && status.state !== "running" ? "stale" : status.state;
+    const text = status.state === "running" ? "Testing…"
+        : status.state === "failing" ? `✗ ${status.counts.failed + status.counts.error} failing`
+        : status.stale ? `${status.ran}/${status.linked} tested · stale`
+        : status.state === "passed" ? `✓ ${status.counts.passed} passed`
+        : status.state === "skipped" ? `${status.counts.passed} passed · ${status.counts.skipped} skipped`
+        : status.state === "partial" ? `${status.ran}/${status.linked} tested` : `${status.linked} tests`;
+    const chip = el("span", `layer-tests layer-tests-${kind}`, text);
+    chip.title = `Linked tests for this layer: ${layerTestSummary(status)}. Run them from "What was verified?" beside the code.`;
+    return chip;
+}
+
+function layerVerifyBlock(layer) {
+    const block = el("div", "layer-verify");
+    block.setAttribute("aria-live", "polite");
+    const status = layerTests(layer);
+    const label = layerLabel(layer);
+    if (status.state === "loading") {
+        block.append(el("p", "muted", `Finding the tests linked to ${label}…`));
+        return block;
+    }
+    if (status.state === "unavailable") {
+        block.append(el("p", "muted", state.payload?.decision_map?.status === "error"
+            ? "Linked tests are unavailable because code-path analysis failed."
+            : "Linked tests are unavailable for this review (no code-path test links)."));
+        return block;
+    }
+    if (status.state === "none") {
+        block.append(el("p", "", `No linked tests reach the changed code in ${label}.`));
+        return block;
+    }
+    const run = state.payload?.test_run;
+    const plan = layerPlanFor(layer);
+    const head = el("p", "layer-verify-status");
+    head.append(el("strong", "", `${label}: `), layerTestSummary(status));
+    block.append(head);
+    const last = [...(run?.history || [])].reverse().find((entry) => entry.scope?.id === layer.id);
+    if (last && ["error", "cancelled"].includes(last.status) && status.state !== "running") {
+        block.append(el("p", last.status === "error" ? "error" : "muted", last.status === "error"
+            ? `The last run of this layer's tests failed to complete: ${last.error || "see the test output in Explore → Code paths."}` : "The last run of this layer's tests was cancelled."));
+    }
+    const failing = (scopeDecisionMap(state.payload.decision_map, layerPaths(layer)).verification?.tests || [])
+        .filter((test) => ["failed", "error"].includes(linkedTestOutcome(run, test.id)));
+    if (failing.length) {
+        const list = el("ul", "layer-verify-failing");
+        for (const test of failing.slice(0, 5)) {
+            const item = el("li", "");
+            const open = el("button", "link-button", `${test.name} ${linkedTestOutcome(run, test.id)}`);
+            open.type = "button";
+            open.title = `Open ${test.path}:${test.line}`;
+            open.addEventListener("click", async () => {
+                const epoch = ++state.selectionEpoch;
+                try {
+                    if (await loadSource(`path=${encodeURIComponent(test.path)}&line=${test.line}&side=current`, epoch, "current", "reset")
+                        && epoch === state.selectionEpoch) elements.source.focus({ preventScroll: true });
+                } catch (error) { if (epoch === state.selectionEpoch) showError(error); }
+            });
+            item.append(open);
+            list.append(item);
+        }
+        block.append(list);
+    }
+    const actions = el("div", "layer-verify-actions");
+    const running = run?.status === "running";
+    const button = el("button", "layer-verify-run", status.state === "running" ? "Running…"
+        : status.state === "not-run" ? `Run ${countLabel(status.linked, "linked test")}` : "Rerun this layer's tests");
+    button.type = "button";
+    button.dataset.focusKey = "run";
+    button.disabled = running || !plan?.available;
+    button.title = plan?.available ? plan.command : plan?.reason || "Checking the linked tests…";
+    button.addEventListener("click", async () => {
+        // Re-renders replace these controls; keep keyboard focus on the equivalent control (Cancel while running).
+        state.layerVerifyFocus = "cancel";
+        button.disabled = true;
+        try { await api("/api/test-run", { method: "POST", body: JSON.stringify({ layer: layerScope(layer) }) }); }
+        catch (error) { state.layerVerifyFocus = null; showError(error); button.disabled = false; }
+    });
+    actions.append(button);
+    if (running) {
+        const cancel = el("button", "link-button", "Cancel");
+        cancel.type = "button";
+        cancel.dataset.focusKey = "cancel";
+        cancel.addEventListener("click", () => {
+            state.layerVerifyFocus = "run";
+            api("/api/test-run/cancel", { method: "POST", body: "{}" }).catch(showError);
+        });
+        actions.append(cancel);
+    }
+    block.append(actions);
+    const traced = plan && !["csharp", "rust"].includes(plan.adapter_id);
+    if (traced && status.ran && !status.stale) {
+        const legend = el("p", "muted layer-verify-note trace-legend");
+        for (const [kind, text] of [["passed", "a linked test ran this changed path"], ["missed", "no linked test reached it"], ["failing", "only failing tests ran it"]]) {
+            const item = el("span", "");
+            item.append(el("span", `trace-dot trace-dot-${kind}`), text);
+            legend.append(item);
+        }
+        block.append(legend);
+    }
+    block.append(el("p", "muted layer-verify-note", running
+        ? `${run.scope?.id === layer.id ? "Running" : `Running ${run.scope ? layerLabel(state.workspaceNavigation?.layers.find((item) => item.id === run.scope.id)) || "another layer" : "all linked tests"}:`} ${
+            countLabel(run.planned || 0, "test")} in ${run.location || "the worktree"}. Usually under a minute; you can keep reading.`
+        : plan?.available ? `Runs in ${plan.location} and executes repository code.${traced ? " Changed code-path lines a linked test executed are marked in the gutter." : " Records outcomes; this language has no per-line trace."}`
+            : plan?.reason || "Checking the linked tests…"));
+    return block;
+}
+
+// Gutter marks on changed code paths that a linked test run executed (green), only failing tests executed (red), or did not reach.
+function renderTestTrace() {
+    for (const cell of elements.source.querySelectorAll(".line-number[data-trace]")) {
+        cell.removeAttribute("data-trace");
+        cell.removeAttribute("title");
+    }
+    const run = state.payload?.test_run;
+    const map = state.payload?.decision_map;
+    const source = state.source;
+    const lines = elements.source.querySelector(".code-lines");
+    // Trace dots sit left of the line number; widen the number column while any are shown so digits stay readable.
+    const widen = (marked) => { if (lines?.dataset.lineDigits) lines.style.setProperty("--source-line-digits", String(Number(lines.dataset.lineDigits) + (marked ? 1.5 : 0))); };
+    widen(false);
+    if (!source || map?.status !== "complete" || !["complete", "running"].includes(run?.status) || !run?.executed || run.stale || elements.source.getAttribute("aria-busy") === "true") return;
+    let marked = 0;
+    for (const callable of (map.callables || []).filter((item) => item.path === source.path)) {
+        if (!run.ran?.[callable.id]) continue;
+        for (const entry of callable.entries || []) {
+            if (entry.status === "removed" || entry.decision.implicit) continue;
+            const hits = run.executed[`${callable.id}:${entry.decision.line}`];
+            if (hits === undefined || hits === null) continue;
+            const row = commentRow(entry.decision.line, "RIGHT");
+            const cell = row?.children[1]?.classList.contains("line-number") ? row.children[1] : row?.querySelector(".line-number");
+            if (!cell) continue;
+            const failing = hits.length && hits.every((hit) => hit.outcome !== "passed");
+            cell.dataset.trace = !hits.length ? "missed" : failing ? "failing" : "passed";
+            marked++;
+            const names = hits.map((hit) => hit.id.split("::").at(-1));
+            cell.title = !hits.length ? `Line ${entry.decision.line}: no linked test executed this code path`
+                : `Line ${entry.decision.line}: executed by ${names.slice(0, 3).join(", ")}${names.length > 3 ? ` and ${names.length - 3} more` : ""} (${failing ? "failing" : "passed"})`;
+        }
+    }
+    widen(marked > 0);
+}
+
+// ---- Line comments: GitHub threads (read-only) and local drafts that post with the reviewer's review ----
+
+function ensurePrReview() {
+    const payload = state.payload;
+    if (!payload?.model || payload.loading || state.reviewPickerPending) return;
+    const key = `${payload.review_generation}:${JSON.stringify(payload.review_target || {})}`;
+    if (state.prReviewKey === key) return;
+    state.prReviewKey = key;
+    state.commentEditors = new Map();
+    loadPrReview();
+}
+
+async function loadPrReview({ force = false } = {}) {
+    const key = state.prReviewKey;
+    if (!force && state.prReviewLoading === key) return state.prReviewPromise;
+    state.prReviewLoading = key;
+    state.prReviewPromise = (async () => {
+        try {
+            const data = await api("/api/pr-review");
+            if (state.prReviewKey !== key) return;
+            state.prReview = data;
+            state.prReviewError = data.github_error || null;
+        } catch (error) {
+            if (state.prReviewKey !== key) return;
+            state.prReviewError = error.message;
+        } finally {
+            if (state.prReviewLoading === key) state.prReviewLoading = null;
+        }
+        renderSourceComments();
+        renderFileReview();
+        if (state.reviewPage === "finish") renderFinishReview();
+    })();
+    return state.prReviewPromise;
+}
+
+const isChangedPath = (path) => (state.payload?.model?.changes || []).some((file) => file.path === path && file.status !== "unchanged");
+// A PR whose head moved past the reviewed snapshot cannot take comments anchored to what the reviewer is reading.
+const prHeadMoved = () => state.prReview?.available && state.prReview.head_matches === false;
+
+// Lines GitHub can anchor a review comment to (inside a diff hunk), mirrored from the server's validation.
+function commentableLines(diff) {
+    const right = new Set(), left = new Set();
+    let oldLine = 0, newLine = 0, inHunk = false;
+    for (const line of String(diff || "").split(/\r?\n/)) {
+        const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+        if (hunk) { oldLine = Number(hunk[1]); newLine = Number(hunk[2]); inHunk = true; continue; }
+        if (!inHunk || /^(diff --git |index |--- |\+\+\+ |\\ )/.test(line)) continue;
+        if (line.startsWith("+")) right.add(newLine++);
+        else if (line.startsWith("-")) left.add(oldLine++);
+        else if (line.startsWith(" ")) { left.add(oldLine++); right.add(newLine++); }
+    }
+    return { RIGHT: right, LEFT: left };
+}
+
+// On a pull request GitHub's own patch decides which lines take comments; it can have narrower context than the saved diff.
+function commentableFor(source) {
+    const lines = state.prReview?.commentable;
+    if (!lines) return commentableLines(source?.diff);
+    const file = lines[source?.path];
+    return { RIGHT: new Set(file?.RIGHT || []), LEFT: new Set(file?.LEFT || []) };
+}
+
+// The Comment button and C key comment on the line being read, or the nearest commentable line on that side.
+function commentOnCurrentLine() {
+    const source = state.source;
+    if (!source || !isChangedPath(source.path)) { showError(new Error("Open a changed file to comment on it.")); return; }
+    if (prHeadMoved()) { elements.source.querySelector(".review-comment-notice")?.scrollIntoView({ block: "nearest" }); return; }
+    const viewed = viewedSourceLocation();
+    const side = viewed?.side === "base" ? "LEFT" : "RIGHT";
+    const lines = [...commentableFor(source)[side]];
+    if (!lines.length) { showError(new Error("This file has no diff lines on that side to comment on.")); return; }
+    const wanted = viewed?.line || lines[0];
+    const line = lines.reduce((best, item) => Math.abs(item - wanted) < Math.abs(best - wanted) ? item : best, lines[0]);
+    if (!commentRow(line, side)) { showError(new Error(`Line ${line} is not shown in this tab. Open the Diff tab to comment on it.`)); return; }
+    openCommentEditor({ path: source.path, line, side });
+}
+
+function commentRow(line, side) {
+    return elements.source.querySelector(`.code-row[data-${side === "LEFT" ? "old" : "new"}-line="${line}"]`);
+}
+
+// Which side a clicked line number belongs to: the first number column is the base (old) line.
+function lineNumberAnchor(row, number) {
+    const left = number === row.children[0];
+    const line = Number(left ? row.dataset.oldLine : row.dataset.newLine);
+    return line ? { line, side: left ? "LEFT" : "RIGHT" } : null;
+}
+
+// Comment blocks follow their line (after a split pair as a whole) and after any blocks already there.
+function insertAfterLine(row, block) {
+    let anchor = row.closest(".split-pair") || row;
+    while (anchor.nextElementSibling?.matches(".review-comment, .review-comment-editor, .review-comment-inline-note")) anchor = anchor.nextElementSibling;
+    anchor.after(block);
+}
+
+function commentHeader(author, meta, kind) {
+    const header = el("div", "review-comment-header");
+    header.append(el("strong", "", author), el("span", `review-comment-kind kind-${kind}`, meta));
+    return header;
+}
+
+const sideLabel = (side, line) => `${side === "LEFT" ? "base line" : "line"} ${line}`;
+
+function commentBody(text) {
+    const body = el("div", "review-comment-body markdown");
+    renderMarkdown(body, text);
+    return body;
+}
+
+function threadBlock(thread, replies, className, meta) {
+    const block = el("div", className);
+    for (const item of [thread, ...replies]) {
+        const entry = el("div", "review-comment-entry");
+        entry.append(commentHeader(item.author, item === thread ? meta : `reply · ${new Date(item.created_at).toLocaleDateString()}`, "thread"),
+            commentBody(item.body));
+        block.append(entry);
+    }
+    if (thread.url) {
+        const link = el("a", "review-comment-link", "Reply on GitHub");
+        link.href = thread.url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        block.append(link);
+    }
+    return block;
+}
+
+const editorKey = (editor) => editor.id ? `draft:${editor.id}` : `new:${editor.path}:${editor.side}:${editor.line}`;
+const editorDirty = (editor) => editor.body.trim() !== (editor.original || "").trim();
+
+function renderSourceComments() {
+    // Keep the caret in whichever editor is being typed in across re-renders.
+    const active = document.activeElement?.closest?.(".review-comment-editor");
+    const focusKey = active?.dataset.editorKey || state.commentFocusKey;
+    const selection = active ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
+    state.commentFocusKey = null;
+    elements.source.querySelectorAll(".review-comment, .review-comment-editor, .review-comment-outdated, .review-comment-notice, .review-comment-inline-note")
+        .forEach((node) => node.remove());
+    const source = state.source;
+    const data = state.prReview;
+    const moved = prHeadMoved();
+    elements.workspace_comment.disabled = !source || !isChangedPath(source.path) || moved;
+    elements.workspace_comment.title = !source || !isChangedPath(source.path) ? "Open a changed file to comment on it"
+        : moved ? "The pull request has newer commits than this review; re-open it to comment"
+        : `${data?.available ? "Draft a pull request comment" : "Comment"} on the line you are reading (C), or click a line number`;
+    if (!source || elements.source.getAttribute("aria-busy") === "true") return;
+    const path = source.path;
+    const lines = elements.source.querySelector(".code-lines");
+    const commentable = isChangedPath(path) && !moved ? commentableFor(source) : { RIGHT: new Set(), LEFT: new Set() };
+    for (const row of elements.source.querySelectorAll(".code-row")) {
+        for (const number of row.querySelectorAll(":scope > .line-number")) {
+            const anchor = lineNumberAnchor(row, number);
+            number.classList.toggle("commentable", Boolean(anchor && commentable[anchor.side].has(anchor.line)));
+        }
+    }
+    if (!data) return;
+    if (moved && lines) {
+        const notice = el("div", "review-comment-notice");
+        notice.setAttribute("role", "status");
+        notice.append(el("strong", "", "This pull request has newer commits. "), `GitHub's head is ${String(data.head || "").slice(0, 7)}; this review shows ${
+            String(data.reviewed_head || "").slice(0, 7)}. Commenting and Viewed sync are paused so nothing is posted against code you did not read. Re-open the pull request in Agent Review to review the new commits.`);
+        lines.prepend(notice);
+    }
+    const threads = (data.threads || []).filter((thread) => thread.path === path);
+    const repliesTo = (thread) => threads.filter((reply) => reply.reply_to === thread.id);
+    for (const thread of threads.filter((item) => !item.reply_to && !item.outdated)) {
+        const row = commentRow(thread.line, thread.side);
+        if (!row) continue;
+        insertAfterLine(row, threadBlock(thread, repliesTo(thread), "review-comment review-comment-thread",
+            `on GitHub · ${thread.side === "LEFT" ? "base · " : ""}${new Date(thread.created_at).toLocaleDateString()}`));
+    }
+    const outdated = threads.filter((item) => !item.reply_to && item.outdated);
+    if (outdated.length && lines) {
+        const details = el("details", "review-comment-outdated");
+        details.append(el("summary", "", `${countLabel(outdated.length, "comment")} on other commits of this file`));
+        for (const thread of outdated) {
+            details.append(threadBlock(thread, repliesTo(thread), "review-comment-entry",
+                `${sideLabel(thread.side, thread.original_line ?? "?")} on commit ${String(thread.original_commit || "").slice(0, 7) || "unknown"}`));
+        }
+        lines.prepend(details);
+    }
+    const editors = state.commentEditors || new Map();
+    for (const draft of (data.drafts?.comments || []).filter((item) => item.path === path)) {
+        const row = commentRow(draft.line, draft.side);
+        if (!row || editors.has(`draft:${draft.id}`)) continue;
+        const block = el("div", "review-comment review-comment-draft");
+        block.dataset.draftId = draft.id;
+        block.append(commentHeader("Your draft", `${sideLabel(draft.side, draft.line)} · ${data.available ? "pending · posts with your review" : "local · included in the handoff"}`, "draft"),
+            commentBody(draft.body));
+        const actions = el("div", "review-comment-actions");
+        const edit = el("button", "link-button", "Edit");
+        edit.type = "button";
+        edit.setAttribute("aria-label", `Edit draft on ${sideLabel(draft.side, draft.line)}`);
+        edit.addEventListener("click", () => openCommentEditor({ path, line: draft.line, side: draft.side, id: draft.id, body: draft.body }));
+        const remove = el("button", "link-button", "Delete");
+        remove.type = "button";
+        remove.setAttribute("aria-label", `Delete draft on ${sideLabel(draft.side, draft.line)}`);
+        remove.addEventListener("click", async () => {
+            try { await saveDraftChange({ action: "delete", id: draft.id }); }
+            catch (error) { showError(error); }
+            elements.source.focus({ preventScroll: true });
+        });
+        actions.append(edit, remove);
+        block.append(actions);
+        insertAfterLine(row, block);
+    }
+    for (const [key, editor] of editors) {
+        if (editor.path !== path) continue;
+        const row = commentRow(editor.line, editor.side);
+        if (!row) continue;
+        const block = commentEditorBlock(key, editor);
+        insertAfterLine(row, block);
+        if (key === focusKey) {
+            const textarea = block.querySelector("textarea");
+            requestAnimationFrame(() => {
+                textarea.focus({ preventScroll: !!selection });
+                if (selection) textarea.setSelectionRange(...selection);
+            });
+        }
+    }
+    const note = state.commentNote;
+    if (note?.path === path) {
+        const row = commentRow(note.line, note.side);
+        if (row) {
+            const node = el("p", "review-comment-inline-note", note.message);
+            node.setAttribute("role", "status");
+            insertAfterLine(row, node);
+        }
+    }
+}
+
+function commentEditorBlock(key, editor) {
+    const block = el("div", "review-comment-editor");
+    block.dataset.editorKey = key;
+    const label = `${editor.path.split("/").at(-1)}:${editor.line}${editor.side === "LEFT" ? " (base)" : ""}`;
+    const textarea = el("textarea", "");
+    textarea.rows = 3;
+    textarea.maxLength = 4000;
+    textarea.value = editor.body;
+    textarea.setAttribute("aria-label", `Comment on ${label}`);
+    textarea.placeholder = state.prReview?.available ? "Leave a comment. It posts when you submit your review." : "Leave a comment. It is saved locally and included in the handoff.";
+    textarea.addEventListener("input", () => { editor.body = textarea.value; });
+    const error = el("p", "error", editor.error || "");
+    error.setAttribute("role", "alert");
+    error.classList.toggle("hidden", !editor.error);
+    const actions = el("div", "review-comment-actions");
+    const cancel = el("button", "", "Cancel");
+    cancel.type = "button";
+    const save = el("button", "review-comment-save", editor.id ? "Save comment" : "Add comment");
+    save.type = "button";
+    save.disabled = Boolean(editor.saving);
+    const submit = async () => {
+        if (editor.saving) return;
+        editor.saving = true;
+        editor.error = null;
+        save.disabled = true;
+        error.classList.add("hidden");
+        try {
+            await saveDraftChange(editor.id ? { action: "edit", id: editor.id, body: editor.body }
+                : { action: "add", comment: { path: editor.path, line: editor.line, side: editor.side, body: editor.body } });
+            state.commentEditors.delete(key);
+            renderSourceComments();
+            elements.source.focus({ preventScroll: true });
+        } catch (failure) {
+            editor.saving = false;
+            editor.error = failure.message;
+            // A draft deleted elsewhere cannot be edited; keep the text as a new comment on the same line instead.
+            if (failure.code === "draft_missing") {
+                state.commentEditors.delete(key);
+                delete editor.id;
+                editor.original = "";
+                editor.error = "This draft was deleted in another tab. Your text is kept here; select Add comment to save it as a new comment.";
+                state.commentEditors.set(editorKey(editor), editor);
+                state.commentFocusKey = editorKey(editor);
+            } else state.commentFocusKey = key;
+            renderSourceComments();
+        }
+    };
+    cancel.addEventListener("click", () => { state.commentEditors.delete(key); renderSourceComments(); elements.source.focus({ preventScroll: true }); });
+    save.addEventListener("click", submit);
+    textarea.addEventListener("keydown", (event) => {
+        if ((event.ctrlKey || event.metaKey) && event.key === "Enter") { event.preventDefault(); submit(); }
+        if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); cancel.click(); }
+    });
+    actions.append(cancel, save);
+    block.append(el("p", "review-comment-target muted", `${editor.id ? "Edit comment" : "Comment"} on ${label}`), textarea, error, actions);
+    return block;
+}
+
+// Several editors can be open at once, like on GitHub; opening one never discards text typed in another.
+async function openCommentEditor(editor) {
+    if (!isChangedPath(editor.path)) { showError(new Error("Comments can only be added to changed files.")); return; }
+    // Comments may still be loading from GitHub; open the editor as soon as they arrive rather than refusing.
+    if (!state.prReview) {
+        ensurePrReview();
+        await state.prReviewPromise;
+        if (!state.prReview) { showError(new Error(state.prReviewError || "Review comments could not be loaded.")); return; }
+        if (state.source?.path !== editor.path) return;
+    }
+    if (prHeadMoved()) { renderSourceComments(); return; }
+    state.commentEditors ||= new Map();
+    const key = editorKey(editor);
+    if (!state.commentEditors.has(key)) state.commentEditors.set(key, { ...editor, body: editor.body || "", original: editor.body || "" });
+    state.commentNote = null;
+    state.commentFocusKey = key;
+    renderSourceComments();
+}
+
+window.addEventListener("beforeunload", (event) => {
+    if ([...(state.commentEditors?.values() || [])].some(editorDirty)) event.preventDefault();
+});
+
+async function saveDraftChange(change) {
+    const drafts = state.prReview?.drafts;
+    if (!drafts) throw new Error("Review comments are still loading.");
+    const send = (revision) => api("/api/pr-review/drafts", { method: "POST", body: JSON.stringify({ revision, ...change }) });
+    const missing = (list) => change.id && !list.comments.some((comment) => comment.id === change.id);
+    if (missing(drafts)) {
+        if (change.action === "delete") return;
+        throw Object.assign(new Error("This draft was deleted in another tab."), { code: "draft_missing" });
+    }
+    let result;
+    try { result = await send(drafts.revision); }
+    catch (error) {
+        if (error.status !== 409) throw error;
+        // Another tab changed the drafts: reload them and apply this one change on top.
+        await loadPrReview({ force: true });
+        const current = state.prReview?.drafts;
+        if (!current) throw new Error("Review comments could not be reloaded; your text is kept. Try again.");
+        if (missing(current)) {
+            if (change.action === "delete") return;
+            throw Object.assign(new Error("This draft was deleted in another tab."), { code: "draft_missing" });
+        }
+        result = await send(current.revision);
+    }
+    state.prReview = { ...state.prReview, drafts: result };
+    renderSourceComments();
+    renderFileReview();
+}
+
+// Clicking a line number starts a comment on that side of that line.
+elements.source.addEventListener("click", (event) => {
+    const number = event.target.closest?.(".line-number");
+    const row = number?.closest(".code-row");
+    if (!number || !row || !state.source || !isChangedPath(state.source.path)) return;
+    const anchor = lineNumberAnchor(row, number);
+    if (!anchor) return;
+    if (prHeadMoved()) return;
+    if (!commentableFor(state.source)[anchor.side].has(anchor.line)) {
+        // Explain beside the line rather than with the page-wide error banner.
+        state.commentNote = { path: state.source.path, ...anchor,
+            message: state.prReview?.commentable
+                ? `${sideLabel(anchor.side, anchor.line)} is outside the pull request's diff on GitHub, so GitHub cannot anchor a comment there. Comment on a changed or nearby line.`
+                : `${sideLabel(anchor.side, anchor.line)} is outside the diff. Comment on a changed or nearby line.` };
+        renderSourceComments();
+        return;
+    }
+    openCommentEditor({ path: state.source.path, ...anchor });
+});
 
 function applySourceFocus(rows, focusStart, focusEnd, focusSide) {
     const focused = [];
@@ -4541,7 +5429,8 @@ function openReviewPlanItem(item) {
         return;
     }
     if (item.kind === "callable" && item.preferred) {
-        openDecision(item.callable, item.preferred.entry);
+        rememberSourceReturnFocus();
+        openDecision(item.callable, item.preferred.entry, { focus: true });
         return;
     }
     selectItem(item.finding || item.node, false);
@@ -4619,7 +5508,7 @@ function renderReviewPlan(model, findings) {
             if (item.evidence.inferred) proof.append(el("span", "proof-inferred", `${item.evidence.inferred} inferred`));
             if (item.evidence.confirmed) proof.append(el("span", "proof-confirmed", `${item.evidence.confirmed} confirmed`));
             if (proof.childElementCount) copy.append(proof);
-            const chip = el("span", "layer-chip", layer ? layer.number ? String(layer.number) : "·" : "–");
+            const chip = layer ? layerMarker(layer, "layer-chip") : el("span", "layer-chip", "–");
             chip.title = layer ? layerLabel(layer) : "Outside the reading path";
             row.append(chip, copy, el("span", "review-plan-open", "Open →"));
             row.addEventListener("click", () => openReviewPlanItem(item));
@@ -4850,7 +5739,7 @@ function decisionCounts(item) {
     return counts;
 }
 
-async function openDecision(callable, entry, { select = true } = {}) {
+async function openDecision(callable, entry, { select = true, focus = false } = {}) {
     const node = state.payload?.model?.nodes.find((candidate) => candidate.id === callable.id);
     if (select && node) {
         state.selected = node;
@@ -4862,7 +5751,9 @@ async function openDecision(callable, entry, { select = true } = {}) {
     const side = entry.status === "removed" ? "base" : "current";
     const query = `path=${encodeURIComponent(callable.path)}&line=${decision.line}&end=${decision.end_line || decision.line}&side=${side}`;
     try {
-        if (await loadSource(query, epoch, side, select ? "reset" : "push") && state.selected) ensureAnnotation(state.selected, epoch);
+        const loaded = await loadSource(query, epoch, side, select ? "reset" : "push");
+        if (loaded && state.selected) ensureAnnotation(state.selected, epoch);
+        if (loaded && focus && epoch === state.selectionEpoch) elements.source.focus({ preventScroll: true });
     } catch (error) {
         if (epoch === state.selectionEpoch) showError(error);
     }
@@ -4981,7 +5872,15 @@ function testPlanFor(generation) {
                 state.sourceDecisionsKey = null;
                 renderSourceDecisions();
             }
-        }).catch((error) => { state.testPlan = { generation, plan: { available: false, reason: error.message } }; });
+        }).catch((error) => {
+            if (state.testPlan?.generation !== generation) return;
+            state.testPlan = { generation, plan: { available: false, reason: error.message } };
+            if (state.mode === "decisions") render();
+            if (!elements.source_panel.classList.contains("hidden")) {
+                state.sourceDecisionsKey = null;
+                renderSourceDecisions();
+            }
+        });
     }
     return null;
 }
@@ -5189,6 +6088,8 @@ function renderSourceRisk() {
 
 function renderReviewContext() {
     const panel = elements.source_review_context;
+    // Re-renders replace the verify controls; remember which one had keyboard focus so it can be restored.
+    const held = panel.contains(document.activeElement) ? document.activeElement.dataset?.focusKey || null : null;
     panel.replaceChildren();
     panel.classList.toggle("hidden", !state.source);
     if (!state.source || !state.payload?.model) return;
@@ -5203,7 +6104,9 @@ function renderReviewContext() {
         return block;
     };
     if (!annotation?.body) section("What changed?", [context.change
-        ? `${context.change.status} file: +${context.change.lines_added || 0} / -${context.change.lines_removed || 0} saved lines. Inspect the diff for behavior.`
+        ? context.change.generated
+            ? `${context.change.status} generated or minified file (built output): +${context.change.lines_added || 0} / -${context.change.lines_removed || 0} saved lines. It is not parsed for symbols; review the source that produces it instead.`
+            : `${context.change.status} file: +${context.change.lines_added || 0} / -${context.change.lines_removed || 0} saved lines. Inspect the diff for behavior.`
         : "Related saved source, outside the changed-file scope."]);
     const consumers = context.impact.counts["Potential consumer"];
     const tests = context.impact.counts["Related test"];
@@ -5214,12 +6117,24 @@ function renderReviewContext() {
     impact.type = "button";
     impact.addEventListener("click", () => elements.source_impact.click());
     affected.append(impact);
-    section("What was verified?", context.verification);
+    const verified = section("What was verified?", context.verification);
+    const layer = currentReadingLayer();
+    if (layer && (state.payload.model.changes || []).some((change) => change.path === state.source.path)) verified.prepend(verified.firstChild, layerVerifyBlock(layer));
     section("What remains open?", context.gaps.length ? context.gaps : ["No additional gaps were recorded for this selection; this is not a correctness guarantee."]);
+    const wanted = state.layerVerifyFocus || held;
+    if (wanted && (document.activeElement === document.body || panel.contains(document.activeElement))) {
+        const target = [panel.querySelector(`[data-focus-key="${wanted}"]`), panel.querySelector('[data-focus-key="cancel"]'), panel.querySelector('[data-focus-key="run"]')]
+            .find((node) => node && !node.disabled);
+        if (target) {
+            target.focus({ preventScroll: true });
+            state.layerVerifyFocus = null;
+        }
+    }
 }
 
 function renderSourceDecisions() {
     renderReviewContext();
+    renderTestTrace();
     const panel = elements.source_decisions;
     const map = state.payload?.decision_map;
     const model = state.payload?.model;
@@ -5761,6 +6676,9 @@ function renderCustomAnalyses() {
             !prompt.trusted ? "Approval required" : result?.status || "Waiting"));
         details.append(summary, el("p", "muted", `${prompt.scope === "global" ? "All repositories" : "This repository"} · Saved snapshot · AI-generated, verify claims`));
         appendInternalReview(details, result, `custom:${key}`, () => runCustomAnalyses({ scope: prompt.scope, id: prompt.id, force: false }));
+        if (result?.status === "running" && !result.coverage) {
+            details.append(aiPlaceholder(`custom:${key}`, "Copilot is running this check...", 3));
+        }
         if (result?.content) {
             markdownContext.subject = null;
             markdownContext.intent = null;
@@ -5768,8 +6686,8 @@ function renderCustomAnalyses() {
             if (result.coverage) renderInternalReviewBody(body, result);
             else renderMarkdown(body, result.content);
             details.append(body);
-        } else if (["queued", "running"].includes(result?.status)) {
-            details.append(aiPlaceholder(`custom:${key}`, result.status === "queued" ? "Waiting for the previous check…" : "Copilot is running this check…", 3));
+        } else if (result?.status === "queued") {
+            details.append(aiPlaceholder(`custom:${key}`, "Waiting for the previous check...", 3));
         }
         if (result?.error) details.append(el("p", "error", result.error));
         const rerun = el("button", "", result ? "Run again" : "Run now");
@@ -5982,6 +6900,7 @@ function renderView() {
     }
     loadClosedFindingKeys(model);
     loadReviewLedger(model);
+    ensurePrReview();
     if (state.queueError) showError(new Error(state.queueError));
     if (state.reviewLedgerError) showError(new Error(state.reviewLedgerError));
     if (!state.connectionLost && !payload.loading && !payload.cancelled) {
@@ -6002,9 +6921,9 @@ function renderView() {
     const groupedObservations = [
         ...groupFindings(model.attention || []),
         ...(payload.generated_observations || []),
-    ].sort((a, b) => (b.impact_score || 0) - (a.impact_score || 0));
-    const active = groupedObservations.filter((item) => !isFindingClosed(item, state.closedFindingKeys));
-    const closed = groupedObservations.filter((item) => isFindingClosed(item, state.closedFindingKeys));
+    ].sort((a, b) => (concernPriority(b) ?? 0) - (concernPriority(a) ?? 0));
+    const active = groupedObservations.filter((item) => !concernClosed(item));
+    const closed = groupedObservations.filter((item) => concernClosed(item));
     elements.attention_count.textContent = String(active.length);
     elements.attention_count.title = `${countLabel(active.length, "active finding")} · ${countLabel(closed.length, "closed finding")}`;
     renderCards(elements.attention, [
@@ -6317,13 +7236,16 @@ window.addEventListener("keydown", (event) => {
     } else if (key === "f") {
         event.preventDefault();
         setSourceFocus(!state.sourceFocused);
+    } else if (key === "c" && state.source && !elements.source_panel.classList.contains("hidden")) {
+        event.preventDefault();
+        commentOnCurrentLine();
     } else if (key === "u" && state.source && state.sourceTab === "diff" && innerWidth >= SPLIT_DIFF_MIN_WIDTH) {
         event.preventDefault();
         setDiffLayout(diffLayoutPreference() === "split" ? "unified" : "split");
     } else if (key === "m" && state.reviewPage === "review" && !state.exploring && !elements.file_review_form.classList.contains("hidden")) {
-        // Mark the open file and move on, without reaching for the footer (also works in focus mode).
+        // Mark the open file and move on, without reaching for the footer (also works in focus mode). Held keys never mark a run of files.
         event.preventDefault();
-        if (!elements.file_review_next.disabled) elements.file_review_form.requestSubmit(elements.file_review_next);
+        if (!event.repeat && !elements.file_review_next.disabled && !state.advancing) elements.file_review_form.requestSubmit(elements.file_review_next);
     } else if (key === "/") {
         event.preventDefault();
         if (elements.review_search.getClientRects().length) elements.review_search.focus();
@@ -6383,6 +7305,103 @@ elements.rail_resize.addEventListener("keydown", (event) => {
     event.preventDefault();
     const current = document.querySelector(".rail").getBoundingClientRect().width;
     setRailWidth(current + (event.key === "ArrowRight" ? 20 : -20));
+});
+
+// ---- Resizable Review panes: the file navigation on the left and the evidence pane on the right ----
+// Widths persist across sessions and are clamped so the code always keeps a usable width.
+const PANE_WIDTHS = {
+    nav: { key: "agent-review.navigation-width", property: "--workspace-navigation-width", min: 180,
+        max: () => Math.max(240, Math.min(560, window.innerWidth - 640)) },
+    side: { key: "agent-review.evidence-width", property: "--source-side-width", min: 240,
+        max: () => Math.max(280, (elements.source_side_resize.parentElement?.clientWidth || window.innerWidth) - 360) },
+};
+
+function setPaneWidth(name, width, { persist = true } = {}) {
+    const pane = PANE_WIDTHS[name];
+    const value = Math.round(Math.max(pane.min, Math.min(pane.max(), width)));
+    document.documentElement.style.setProperty(pane.property, `${value}px`);
+    const handle = name === "nav" ? elements.workspace_nav_resize : elements.source_side_resize;
+    handle.setAttribute("aria-valuenow", String(value));
+    handle.setAttribute("aria-valuemin", String(pane.min));
+    handle.setAttribute("aria-valuemax", String(Math.round(pane.max())));
+    if (persist) { try { localStorage.setItem(pane.key, String(value)); } catch { /* still applies to this view */ } }
+    positionSideResize();
+    detectHostResize();
+}
+
+function resetPaneWidth(name) {
+    const pane = PANE_WIDTHS[name];
+    document.documentElement.style.removeProperty(pane.property);
+    try { localStorage.removeItem(pane.key); } catch { /* nothing saved */ }
+    positionSideResize();
+    detectHostResize();
+}
+
+const paneWidth = (name) => name === "nav"
+    ? elements.review_navigation.getBoundingClientRect().width
+    : document.querySelector(".source-side")?.getBoundingClientRect().width || 0;
+
+// The evidence-pane handle sits on the pane's left border wherever the grid puts it.
+function positionSideResize() {
+    const handle = elements.source_side_resize;
+    const side = handle.parentElement?.querySelector(".source-side");
+    const body = handle.parentElement;
+    const visible = Boolean(side && body && document.body.classList.contains("reviewing") && side.offsetWidth > 0
+        && getComputedStyle(body).display === "grid" && !document.body.classList.contains("review-source-focus"));
+    handle.classList.toggle("hidden", !visible);
+    if (visible) handle.style.left = `${side.offsetLeft - 4}px`;
+}
+
+function wirePaneResize(name, handle) {
+    // Dragging toward the code widens the navigation; dragging toward the code narrows the evidence pane.
+    const direction = name === "nav" ? 1 : -1;
+    let start = null;
+    handle.addEventListener("pointerdown", (event) => {
+        if (event.button !== 0) return;
+        start = { x: event.clientX, width: paneWidth(name) };
+        handle.setPointerCapture(event.pointerId);
+        handle.classList.add("is-dragging");
+        document.body.classList.add("resizing-pane");
+        event.preventDefault();
+    });
+    handle.addEventListener("pointermove", (event) => {
+        if (!start || !handle.hasPointerCapture(event.pointerId)) return;
+        setPaneWidth(name, start.width + direction * (event.clientX - start.x), { persist: false });
+    });
+    const finish = (event) => {
+        if (!start) return;
+        start = null;
+        if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId);
+        handle.classList.remove("is-dragging");
+        document.body.classList.remove("resizing-pane");
+        setPaneWidth(name, paneWidth(name));
+    };
+    handle.addEventListener("pointerup", finish);
+    handle.addEventListener("pointercancel", finish);
+    handle.addEventListener("dblclick", () => resetPaneWidth(name));
+    handle.addEventListener("keydown", (event) => {
+        if (!["ArrowLeft", "ArrowRight", "Home"].includes(event.key)) return;
+        event.preventDefault();
+        if (event.key === "Home") { resetPaneWidth(name); return; }
+        setPaneWidth(name, paneWidth(name) + direction * (event.key === "ArrowRight" ? 24 : -24));
+    });
+}
+wirePaneResize("nav", elements.workspace_nav_resize);
+wirePaneResize("side", elements.source_side_resize);
+for (const name of Object.keys(PANE_WIDTHS)) {
+    let saved = NaN;
+    try { saved = Number(localStorage.getItem(PANE_WIDTHS[name].key)); } catch { /* no saved width */ }
+    if (Number.isFinite(saved) && saved > 0) setPaneWidth(name, saved, { persist: false });
+}
+const paneObserver = new ResizeObserver(() => positionSideResize());
+for (const node of [document.querySelector(".source-side"), elements.source_side_resize.parentElement]) if (node) paneObserver.observe(node);
+window.addEventListener("resize", () => {
+    positionSideResize();
+    // Keep saved widths within the new window size.
+    for (const name of Object.keys(PANE_WIDTHS)) {
+        const current = parseFloat(document.documentElement.style.getPropertyValue(PANE_WIDTHS[name].property));
+        if (Number.isFinite(current) && current > PANE_WIDTHS[name].max()) setPaneWidth(name, current, { persist: false });
+    }
 });
 elements.source_close.addEventListener("click", () => {
     rememberWorkspaceSource();
@@ -6491,6 +7510,14 @@ function resetReviewNavigation() {
     state.sectionDataKey = null;
     state.sectionLoadingKey = null;
     state.sectionError = null;
+    state.layerSummaryRequested = null;
+    state.layerSummaryLoading = false;
+    state.layerSummaryError = null;
+    state.annotationRequests.clear();
+    state.prefetchedAnnotations = new Set();
+    state.prefetchStatus = null;
+    clearTimeout(state.prefetchTimer);
+    renderPrefetchStatus();
     state.openSectionKeys = new Set();
     state.openSectionRangeKeys = new Set();
     state.summaryKey = null;
@@ -6801,7 +7828,8 @@ function connectEvents() {
     events.addEventListener("state", (event) => {
         if (state.eventSource !== events) return;
         const update = JSON.parse(event.data);
-        const previousOverview = state.payload?.annotations?.overview?.body;
+        const previousOverview = state.payload?.annotations?.overview;
+        const previousLayers = state.payload?.annotations?.layers;
         state.eventSnapshotReceived = true;
         const payload = update.partial ? { ...state.payload, ...update } : update;
         if (payload.type === "repository-changed") {
@@ -6825,7 +7853,12 @@ function connectEvents() {
             return;
         }
         if (payload.type === "annotation") {
-            if (previousOverview !== payload.annotations?.overview?.body) renderChangeBrief();
+            const overview = payload.annotations?.overview;
+            if (["body", "basis", "refining", "refine_error"].some((key) => previousOverview?.[key] !== overview?.[key])) renderChangeBrief();
+            if (previousLayers?.generated_at !== payload.annotations?.layers?.generated_at) {
+                renderWorkspaceNavigation();
+                renderReviewOverview();
+            }
             const annotation = payload.annotations?.[state.selected?.id];
             if (annotation) renderAnnotation(state.selected, annotation);
             return;

@@ -324,6 +324,38 @@ test("ADO handoff never reaches the GitHub publisher, even through direct HTTP s
     assert.equal(posts, 0);
 });
 
+test("ADO reviews never reach GitHub's Viewed, thread or comment APIs; drafts stay local and export in the summary", async (t) => {
+    const root = await mkdtemp(join(tmpdir(), "ado-pr-review-"));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const model = { metadata: { repo_root: root, head_sha: source, base_sha: common }, changes: [{ path: "a.js", status: "modified" }], nodes: [], attention: [], warnings: [],
+        source_files: { "a.js": { current: "x\ny\n", baseline: "x\n", diff: "@@ -1 +1,2 @@\n x\n+y\n" } } };
+    const githubCalls = [];
+    let posts = 0;
+    const state = new ReviewState(root, { runAnalyzer: async () => model, workspacePath: root,
+        github: async (args) => { githubCalls.push(args); throw new Error("GitHub must not be called for Azure DevOps"); },
+        submitHandoffReview: async () => { posts++; } });
+    t.after(() => state.dispose());
+    state.model = model;
+    state.reviewTarget = { mode: "pr", provider: "ado", url, currentRef: source, baseRef: common, iteration: 3,
+        targetBranch: "refs/heads/main", targetRef: common, label: "ADO PR #42" };
+
+    await assert.rejects(state.pullRequestInfo({ fresh: true }), /not a GitHub pull request/);
+    assert.equal(await state.pullRequestLines(), null);
+    assert.equal(await state.syncViewed({}, { "review-file:a.js": { disposition: "reviewed", path: "a.js" } }), null);
+    const view = await state.prReview();
+    assert.equal(view.available, false);
+    assert.match(view.reason, /Azure DevOps review is read-only/);
+    await state.updateReviewDraft({ revision: 0, action: "add", comment: { path: "a.js", line: 2, side: "RIGHT", body: "Check y." } });
+    const preview = await state.prepareHandoff();
+    assert.equal(preview.provider.available, false);
+    assert.match(preview.markdown, /## Line comments\n.*\n- ` a\.js:2 ` — Check y\./, "ADO drafts travel in the exported summary");
+    assert.doesNotMatch(preview.markdown, /under your GitHub identity/);
+    assert.match(preview.markdown, /publishing is unavailable/);
+    await assert.rejects(state.submitHandoff({ token: preview.token, confirm: true }), /publishing is unavailable/);
+    assert.deepEqual(githubCalls, []);
+    assert.equal(posts, 0);
+});
+
 test("ADO list endpoint uses the clone's origin and PR cache keys distinguish provider and identity", async (t) => {
     const { repo } = await gitRepository(t);
     const { client } = fakeAdo();
