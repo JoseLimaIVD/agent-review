@@ -374,6 +374,16 @@ main { width: 100%; max-width: none; padding: 20px 20px 36px; }
   background: var(--cp-accent);
 }
 .resizing-rail { cursor: col-resize; user-select: none; }
+/* Review pane splitters: a thin hit area on the pane border that highlights on hover, focus and drag. */
+.pane-resize { position: fixed; z-index: 131; width: 8px; cursor: col-resize; touch-action: none; display: none; }
+.pane-resize::after { content: ""; position: absolute; inset: 0 3px; background: transparent; transition: background .1s; }
+.pane-resize:hover::after, .pane-resize:focus-visible::after, .pane-resize.is-dragging::after { background: var(--cp-link); }
+.pane-resize:focus-visible { outline: none; }
+body.reviewing .review-navigation:not(.hidden) + .nav-pane-resize { display: block; top: var(--workflow-height); bottom: 0; left: calc(var(--workspace-navigation-width) - 4px); }
+body.reviewing.review-source-focus .nav-pane-resize { display: none !important; }
+body.reviewing .side-pane-resize:not(.hidden) { display: block; position: absolute; top: 0; bottom: 0; z-index: 6; }
+.resizing-pane, .resizing-pane * { cursor: col-resize !important; user-select: none !important; }
+@media (max-width: 900px) { .pane-resize { display: none !important; } }
 .detail { border-left: 1px solid var(--cp-border); }
 .detail { position: relative; }
 .pane-close {
@@ -2307,7 +2317,7 @@ body.reviewing.review-source-focus #session-history-panel { left: 0; border-left
 .handoff-confirm input { flex: 0 0 auto; margin-top: 4px; }
 body.finishing-review > .topbar { display: none; }
 body.finishing-review main > :not(#review-finish):not(#error):not(#connection-notice):not(#worktree-notice) { display: none !important; }
-body.reviewing .source-body { display: grid; flex-direction: initial; grid-template-columns: minmax(0, 1fr) minmax(280px, 32%); }
+body.reviewing .source-body { position: relative; display: grid; flex-direction: initial; grid-template-columns: minmax(0, 1fr) var(--source-side-width, minmax(280px, 32%)); }
 body.reviewing .source-side { order: initial; max-height: none; border-top: 0; border-left: 1px solid var(--cp-border); }
 body.reviewing .source-body > .code-frame { min-height: 0; }
 body.reviewing #source-risk { flex: 0 0 auto; align-content: flex-start; }

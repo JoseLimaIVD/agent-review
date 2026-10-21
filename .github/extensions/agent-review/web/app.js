@@ -72,7 +72,7 @@ const elements = Object.fromEntries([
     "handoff-markdown-save", "handoff-state-save", "handoff-state-preview", "handoff-import-file", "handoff-import-preview",
     "handoff-import-confirm", "handoff-import-error", "handoff-provider", "handoff-provider-section", "handoff-verdict", "handoff-confirm-text", "handoff-provider-status", "handoff-provider-error", "handoff-confirm", "handoff-submit", "handoff-summary",
     "status", "refresh", "cancel-analysis", "analysis-cancelled", "source-context-notice", "connection-notice", "reconnect", "worktree-notice", "worktree-notice-text", "worktree-overview", "error", "analysis-progress", "progress-phase", "progress-message", "progress-percent",
-    "progress-bar", "summary", "breadcrumbs", "attention", "attention-count", "packages", "rail-resize", "impact-view", "source-impact",
+    "progress-bar", "summary", "breadcrumbs", "attention", "attention-count", "packages", "rail-resize", "workspace-nav-resize", "source-side-resize", "impact-view", "source-impact",
     "show-evidence", "show-discussion", "item-discussion", "sections-view", "source-section",
     "source-focus", "source-location", "review-command-open", "review-command-palette", "review-command-close", "review-command-query", "review-command-count", "review-command-results",
     "graph", "level-label", "graph-title", "zoom-out", "changed-only", "review-search", "detail-toggle", "detail", "detail-close", "source-panel", "source-title",
@@ -7237,6 +7237,103 @@ elements.rail_resize.addEventListener("keydown", (event) => {
     event.preventDefault();
     const current = document.querySelector(".rail").getBoundingClientRect().width;
     setRailWidth(current + (event.key === "ArrowRight" ? 20 : -20));
+});
+
+// ---- Resizable Review panes: the file navigation on the left and the evidence pane on the right ----
+// Widths persist across sessions and are clamped so the code always keeps a usable width.
+const PANE_WIDTHS = {
+    nav: { key: "agent-review.navigation-width", property: "--workspace-navigation-width", min: 180,
+        max: () => Math.max(240, Math.min(560, window.innerWidth - 640)) },
+    side: { key: "agent-review.evidence-width", property: "--source-side-width", min: 240,
+        max: () => Math.max(280, (elements.source_side_resize.parentElement?.clientWidth || window.innerWidth) - 360) },
+};
+
+function setPaneWidth(name, width, { persist = true } = {}) {
+    const pane = PANE_WIDTHS[name];
+    const value = Math.round(Math.max(pane.min, Math.min(pane.max(), width)));
+    document.documentElement.style.setProperty(pane.property, `${value}px`);
+    const handle = name === "nav" ? elements.workspace_nav_resize : elements.source_side_resize;
+    handle.setAttribute("aria-valuenow", String(value));
+    handle.setAttribute("aria-valuemin", String(pane.min));
+    handle.setAttribute("aria-valuemax", String(Math.round(pane.max())));
+    if (persist) { try { localStorage.setItem(pane.key, String(value)); } catch { /* still applies to this view */ } }
+    positionSideResize();
+    detectHostResize();
+}
+
+function resetPaneWidth(name) {
+    const pane = PANE_WIDTHS[name];
+    document.documentElement.style.removeProperty(pane.property);
+    try { localStorage.removeItem(pane.key); } catch { /* nothing saved */ }
+    positionSideResize();
+    detectHostResize();
+}
+
+const paneWidth = (name) => name === "nav"
+    ? elements.review_navigation.getBoundingClientRect().width
+    : document.querySelector(".source-side")?.getBoundingClientRect().width || 0;
+
+// The evidence-pane handle sits on the pane's left border wherever the grid puts it.
+function positionSideResize() {
+    const handle = elements.source_side_resize;
+    const side = handle.parentElement?.querySelector(".source-side");
+    const body = handle.parentElement;
+    const visible = Boolean(side && body && document.body.classList.contains("reviewing") && side.offsetWidth > 0
+        && getComputedStyle(body).display === "grid" && !document.body.classList.contains("review-source-focus"));
+    handle.classList.toggle("hidden", !visible);
+    if (visible) handle.style.left = `${side.offsetLeft - 4}px`;
+}
+
+function wirePaneResize(name, handle) {
+    // Dragging toward the code widens the navigation; dragging toward the code narrows the evidence pane.
+    const direction = name === "nav" ? 1 : -1;
+    let start = null;
+    handle.addEventListener("pointerdown", (event) => {
+        if (event.button !== 0) return;
+        start = { x: event.clientX, width: paneWidth(name) };
+        handle.setPointerCapture(event.pointerId);
+        handle.classList.add("is-dragging");
+        document.body.classList.add("resizing-pane");
+        event.preventDefault();
+    });
+    handle.addEventListener("pointermove", (event) => {
+        if (!start || !handle.hasPointerCapture(event.pointerId)) return;
+        setPaneWidth(name, start.width + direction * (event.clientX - start.x), { persist: false });
+    });
+    const finish = (event) => {
+        if (!start) return;
+        start = null;
+        if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId);
+        handle.classList.remove("is-dragging");
+        document.body.classList.remove("resizing-pane");
+        setPaneWidth(name, paneWidth(name));
+    };
+    handle.addEventListener("pointerup", finish);
+    handle.addEventListener("pointercancel", finish);
+    handle.addEventListener("dblclick", () => resetPaneWidth(name));
+    handle.addEventListener("keydown", (event) => {
+        if (!["ArrowLeft", "ArrowRight", "Home"].includes(event.key)) return;
+        event.preventDefault();
+        if (event.key === "Home") { resetPaneWidth(name); return; }
+        setPaneWidth(name, paneWidth(name) + direction * (event.key === "ArrowRight" ? 24 : -24));
+    });
+}
+wirePaneResize("nav", elements.workspace_nav_resize);
+wirePaneResize("side", elements.source_side_resize);
+for (const name of Object.keys(PANE_WIDTHS)) {
+    let saved = NaN;
+    try { saved = Number(localStorage.getItem(PANE_WIDTHS[name].key)); } catch { /* no saved width */ }
+    if (Number.isFinite(saved) && saved > 0) setPaneWidth(name, saved, { persist: false });
+}
+const paneObserver = new ResizeObserver(() => positionSideResize());
+for (const node of [document.querySelector(".source-side"), elements.source_side_resize.parentElement]) if (node) paneObserver.observe(node);
+window.addEventListener("resize", () => {
+    positionSideResize();
+    // Keep saved widths within the new window size.
+    for (const name of Object.keys(PANE_WIDTHS)) {
+        const current = parseFloat(document.documentElement.style.getPropertyValue(PANE_WIDTHS[name].property));
+        if (Number.isFinite(current) && current > PANE_WIDTHS[name].max()) setPaneWidth(name, current, { persist: false });
+    }
 });
 elements.source_close.addEventListener("click", () => {
     rememberWorkspaceSource();

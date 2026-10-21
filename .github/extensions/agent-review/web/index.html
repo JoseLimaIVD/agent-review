@@ -63,6 +63,8 @@
         <button id="workspace-group-retry" class="link-button hidden" type="button">Retry grouping</button>
         <div id="workspace-nav-list"></div>
     </aside>
+    <div id="workspace-nav-resize" class="pane-resize nav-pane-resize" role="separator" aria-orientation="vertical" tabindex="0"
+        aria-label="Resize the file navigation. Arrow keys resize; double-click resets." aria-controls="review-navigation"></div>
     <main>
         <p id="review-options-status" class="review-options-status" role="status" aria-live="polite"></p>
         <section id="review-picker-notice" class="review-picker-notice hidden" role="status"></section>
@@ -242,6 +244,8 @@
                     <aside id="source-review-context" class="source-review-context hidden" aria-label="Review context"></aside>
                     <aside id="source-decisions" class="source-decisions hidden" aria-label="Code path changes"></aside>
                 </div>
+                <div id="source-side-resize" class="pane-resize side-pane-resize hidden" role="separator" aria-orientation="vertical" tabindex="0"
+                    aria-label="Resize the evidence pane. Arrow keys resize; double-click resets."></div>
             </div>
             <form id="file-review-form" class="file-review-footer hidden">
                 <label><span id="file-review-label">Whole-file review</span>
