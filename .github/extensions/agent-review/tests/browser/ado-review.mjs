@@ -59,9 +59,8 @@ try {
         };
         const run = (file, args, options) => {
             assert.ok(!args.includes("clone") && !args.includes("checkout"));
-            if (args.includes("remote")) return Promise.resolve({ stdout:
-                "primary\thttps://dev.azure.com/example/Project%20One/_git/sample (fetch)\n"
-                + "mirror\thttps://example.visualstudio.com/Project%20One/_git/sample (fetch)\n" });
+            if (args.includes("get-url")) return Promise.resolve({ stdout:
+                "https://dev.azure.com/example/Project%20One/_git/sample\n" });
             if (args.includes("fetch")) {
                 const local = [...args];
                 local[local.length - 2] = repo;
@@ -79,14 +78,9 @@ try {
         try {
             await page.goto(`${server.url}?scoutTheme=${theme}`);
             await page.locator("#review-mode").selectOption("pr");
-            await page.locator("#review-options-status").getByText(/Choose the repository remote/).waitFor();
-            assert.equal(await page.locator("#review-ref").isDisabled(), true);
-            await page.locator("#review-remote").focus();
-            await page.keyboard.press("p");
-            await page.keyboard.press("Enter");
             await page.waitForFunction(() => !document.querySelector("#review-ref").disabled);
-            assert.equal(await page.locator("#review-remote").inputValue(), "primary");
-            await page.locator("#review-remote").focus();
+            assert.equal(await page.locator("#review-remote").count(), 0, "no remote selector is added");
+            await page.locator("#review-mode").focus();
             await page.keyboard.press("Tab");
             assert.equal(await page.locator("#review-ref").evaluate((element) => element === document.activeElement), true);
             assert.match(await page.locator("#review-ref option").nth(1).textContent(), /active · draft.*created /);
@@ -98,12 +92,6 @@ try {
             assert.equal(state.model.metadata.base_sha, base);
             assert.match((await state.sourceForPath("main.py")).current, /return 2/);
             assert.doesNotMatch((await state.sourceForPath("main.py")).current, /dirty_only/);
-            await page.locator("#review-remote").selectOption("mirror");
-            await page.waitForFunction(() => !document.querySelector("#review-ref").disabled);
-            assert.equal(await page.locator("#review-ref").inputValue(), "", "changing remote must not silently select a PR");
-            await page.locator("#review-ref").selectOption(prUrl);
-            await page.waitForFunction(() => !document.querySelector("#review-mode").disabled);
-            assert.equal(state.reviewTarget.remote, "mirror");
             assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true);
             await page.locator("#workflow-finish").click();
             await page.getByRole("button", { name: "Preview / export handoff", exact: true }).click();
@@ -133,7 +121,7 @@ try {
             assert.equal(submissions, 0);
             assert.equal((await git("status", "--porcelain=v1")).stdout, before);
             assert.deepEqual(errors, []);
-            console.log(`PASS ${theme}/${width}: read-only ADO list, remote selection, keyboard focus, created/closed dates, pinned source, unavailable publishing, recoverable errors`);
+            console.log(`PASS ${theme}/${width}: read-only ADO list from origin, keyboard focus, created/closed dates, pinned source, unavailable publishing, recoverable errors`);
         } finally {
             await page.close();
             await server.close();

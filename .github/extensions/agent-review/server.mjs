@@ -219,7 +219,6 @@ export function startReviewServer(state, options = {}) {
                 sendJson(res, await state.listReviewTargets({
                     mode: requestUrl.searchParams.get("mode"),
                     page: Number(requestUrl.searchParams.get("page") || 0),
-                    remote: requestUrl.searchParams.get("remote") || undefined,
                 }));
                 return;
             }
@@ -229,7 +228,6 @@ export function startReviewServer(state, options = {}) {
                     mode: input.mode,
                     page: 0,
                     refresh: input.mode === "commit",
-                    remote: input.remote,
                 }));
                 return;
             }

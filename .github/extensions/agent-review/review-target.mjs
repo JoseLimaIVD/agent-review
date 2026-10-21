@@ -1,7 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createAdoClient, listAdoTargets, parseAdoUrl, resolveAdoTarget } from "./ado-provider.mjs";
-import { reviewRemotes, selectReviewRemote } from "./review-remotes.mjs";
 
 const execute = promisify(execFile);
 const MAX_MESSAGE = 8000;
@@ -27,7 +26,19 @@ async function pullRequestCommits(git, base, head) {
     });
 }
 
-export async function listReviewTargets(repoRoot, { mode, page = 0, refresh = false, remote }, run = execute, options = {}) {
+// The existing clone's origin decides whether its PRs come from Azure DevOps.
+async function adoOrigin(repoRoot, run) {
+    let url;
+    try {
+        url = (await run("git", ["-C", repoRoot, "remote", "get-url", "origin"], {
+            encoding: "utf8", timeout: 10_000, windowsHide: true })).stdout.trim();
+    } catch {
+        return null;
+    }
+    return parseAdoUrl(url, { repository: true });
+}
+
+export async function listReviewTargets(repoRoot, { mode, page = 0, refresh = false }, run = execute, options = {}) {
     if (!Number.isInteger(page) || page < 0 || page > 10_000) throw new Error("Invalid review list page.");
     const invoke = async (command, args) => {
         const result = await run(command, args, { cwd: repoRoot, encoding: "utf8", timeout: 60_000 });
@@ -54,17 +65,11 @@ export async function listReviewTargets(repoRoot, { mode, page = 0, refresh = fa
         return { items: items.slice(0, pageSize), has_more: items.length > pageSize, page };
     }
     if (mode === "pr") {
-        const remotes = await reviewRemotes(repoRoot, run);
-        const selected = selectReviewRemote(remotes, remote);
-        const context = { remotes, selected_remote: selected?.name || null };
-        if (remotes.length && !selected) return { ...context, items: [], page, has_more: false, requires_remote: true };
-        if (selected?.provider === "ado") {
-            return { ...await listAdoTargets(selected, page, options.adoClient || createAdoClient()), ...context };
-        }
+        const origin = await adoOrigin(repoRoot, run);
+        if (origin) return listAdoTargets(origin, page, options.adoClient || createAdoClient());
         let repository;
         try {
-            repository = selected?.repository
-                || JSON.parse(await invoke("gh", ["repo", "view", "--json", "nameWithOwner"])).nameWithOwner;
+            repository = JSON.parse(await invoke("gh", ["repo", "view", "--json", "nameWithOwner"])).nameWithOwner;
         } catch (error) {
             if (/none of the git remotes|no git remotes/i.test(error.stderr || error.message)) {
                 throw new Error("No usable GitHub remote was found. Pull request review requires a GitHub remote matching the gh CLI's host configuration.");
@@ -83,7 +88,7 @@ export async function listReviewTargets(repoRoot, { mode, page = 0, refresh = fa
             return { ref: pr.html_url, number: pr.number, title: pr.title, author: pr.user?.login,
                 date: pr.updated_at, status: pr.merged_at ? "merged" : pr.state };
         });
-        return { items, has_more: items.length === pageSize, page, repository, provider: "github", ...context };
+        return { items, has_more: items.length === pageSize, page, repository };
     }
     throw new Error("Choose Commit or Pull request to list review targets.");
 }
@@ -107,24 +112,15 @@ export async function resolveReviewTarget(repoRoot, target, run = execute, optio
     }
     if (target.mode === "pr") {
         const value = String(target.ref || "").trim();
-        let ado = parseAdoUrl(value);
-        let selected;
-        if (/^[1-9]\d*$/.test(value) || target.remote) {
-            const remotes = await reviewRemotes(repoRoot, run);
-            selected = selectReviewRemote(remotes, target.remote);
-            if (remotes.length && !selected) throw new Error("Choose a repository remote before opening a PR number.");
-            if (/^[1-9]\d*$/.test(value) && selected?.provider === "ado") ado = { ...selected, number: Number(value) };
-        }
+        const ado = parseAdoUrl(value);
         if (ado) {
-            const resolved = await resolveAdoTarget(repoRoot, ado, git, { ...options, client: options.adoClient, remote: selected });
-            return { ...resolved, ...(selected ? { remote: selected.name } : {}) };
+            return resolveAdoTarget(repoRoot, ado, git, {
+                client: options.adoClient || createAdoClient(), remote: await adoOrigin(repoRoot, run) });
         }
         if (!/^[1-9]\d*$/.test(value) && !/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/[1-9]\d*\/?$/.test(value)) {
             throw new Error("Enter a GitHub PR number/URL or an Azure DevOps Services PR URL.");
         }
-        const pr = JSON.parse(await invoke("gh", ["pr", "view", value,
-            ...(selected?.provider === "github" ? ["--repo", selected.repository] : []),
-            "--json", "number,title,url,baseRefOid,headRefOid,body,author"]));
+        const pr = JSON.parse(await invoke("gh", ["pr", "view", value, "--json", "number,title,url,baseRefOid,headRefOid,body,author"]));
         if (!/^[a-f0-9]{40}$/i.test(pr.baseRefOid) || !/^[a-f0-9]{40}$/i.test(pr.headRefOid)) {
             throw new Error("GitHub returned invalid PR commit IDs.");
         }
@@ -134,8 +130,7 @@ export async function resolveReviewTarget(repoRoot, target, run = execute, optio
         const base = await git("merge-base", pr.baseRefOid, pr.headRefOid);
         const intent = { kind: "pr", number: pr.number, title: String(pr.title || ""), author: pr.author?.login || "",
             body: clip(String(pr.body || "").trim()), commits: await pullRequestCommits(git, base, pr.headRefOid) };
-        return { mode: "pr", provider: "github", ref: value, currentRef: pr.headRefOid, baseRef: base,
-            label: `PR #${pr.number}: ${pr.title}`, url: pr.url, intent, ...(selected ? { remote: selected.name } : {}) };
+        return { mode: "pr", ref: value, currentRef: pr.headRefOid, baseRef: base, label: `PR #${pr.number}: ${pr.title}`, url: pr.url, intent };
     }
     throw new Error("Unknown review mode.");
 }

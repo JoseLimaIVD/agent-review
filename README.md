@@ -769,15 +769,14 @@ Pull request first. Selecting Worktree starts its analysis immediately; switchin
 to Commit or Pull request loads a list, and selecting an item starts that review.
 PR objects are fetched without checking out files or changing your worktree.
 
-The PR list detects GitHub or Azure DevOps from the existing local repository's
-fetch remotes. It prefers `origin`; when several supported remotes exist you
-can select a different one, and ambiguous repositories without an origin require
-a choice. The list is repository-scoped, not an organization-wide inbox.
-ADO includes active, completed, abandoned, and draft PRs; dates are labeled
-**created** or **closed**, not presented as last activity.
+The PR list uses the existing local repository's `origin` remote: an Azure DevOps
+Services origin lists its ADO PRs; any other origin keeps the GitHub flow. The
+list is repository-scoped, not an organization-wide inbox. ADO includes active,
+completed, abandoned, and draft PRs; dates are labeled **created** or **closed**,
+not presented as last activity.
 
 To review an ADO PR, open its existing local clone with **Change repository**,
-then choose **Pull request**, the repository remote if needed, and a PR.
+then choose **Pull request** and a PR.
 Active ADO reviews pin the live target branch commit and compare the latest
 source iteration against its merge base, not the synthetic merge result. Target
 advancement does not require a new source iteration or a refreshed merge

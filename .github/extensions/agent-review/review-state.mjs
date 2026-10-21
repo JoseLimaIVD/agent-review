@@ -446,11 +446,11 @@ export class ReviewState {
         if (!supportsGitHubHandoff(preview.target)) {
             throw new Error("Provider publishing is unavailable for this target. Azure DevOps review is read-only; export locally instead.");
         }
-        if (this.loading || this.switchingRepository || this.switchingTarget || this.model !== preview.model || this.reviewTarget !== preview.target || preview.target.mode !== "pr") {
+        if (this.loading || this.model !== preview.model || this.reviewTarget !== preview.target || preview.target.mode !== "pr") {
             throw new Error("The review target changed or is not a PR; nothing was submitted.");
         }
         const progress = await this.progressForReview();
-        if (preview.consumed || this.handoffSubmitting || this.switchingRepository || this.switchingTarget || this.loading || this.model !== preview.model || this.reviewTarget !== preview.target
+        if (preview.consumed || this.handoffSubmitting || this.loading || this.model !== preview.model || this.reviewTarget !== preview.target
             || progress.snapshot !== preview.snapshot || progress.revision !== preview.revision) {
             throw new Error("Review decisions changed. Prepare a new preview before submitting.");
         }
@@ -821,7 +821,7 @@ export class ReviewState {
     }
 
     async setReviewTarget(input) {
-        if (this.refreshPromise || this.switchingTarget || this.switchingRepository || this.handoffSubmitting) throw new Error("Wait for the current analysis, repository switch, or submission to finish.");
+        if (this.refreshPromise || this.switchingTarget) throw new Error("Wait for the current analysis or review switch to finish.");
         if (this.packageRiskPromises.size || this.packageAssessmentPromises.size) {
             throw new Error("Wait for the current package assessment to finish before switching reviews.");
         }

@@ -58,7 +58,7 @@ const state = {
 };
 const elements = Object.fromEntries([
     "source-coverage", "source-position", "diff-layout", "source-strip", "source-strip-toggle", "source-strip-body", "overview-layers", "overview-stats", "overview-limitation",
-    "review-target-form", "review-mode", "review-remote", "review-ref", "review-target-label", "repository-identity", "review-list-refresh", "review-more", "review-options-status", "review-picker-notice", "clean-review", "change-brief",
+    "review-target-form", "review-mode", "review-ref", "review-target-label", "repository-identity", "review-list-refresh", "review-more", "review-options-status", "review-picker-notice", "clean-review", "change-brief",
     "review-overview", "review-background", "overview-title", "overview-description", "overview-progress", "overview-scope", "overview-start", "overview-files",
     "review-workflow", "workflow-overview", "workflow-review", "workflow-finish", "review-finish", "workspace-target", "workspace-freshness", "workspace-find", "workspace-nav-toggle",
     "workspace-return-source", "review-navigation", "workspace-groups", "workspace-files", "workspace-search", "workspace-count",
@@ -6454,7 +6454,6 @@ document.querySelectorAll(".tab").forEach((tab) => tab.addEventListener("click",
 function updateReviewApply() {
     const busy = Boolean(state.connectionLost || state.reviewSubmitting || state.payload?.loading);
     elements.review_mode.disabled = busy;
-    elements.review_remote.disabled = busy || Boolean(state.reviewOptionsLoading);
     elements.review_ref.disabled = busy || Boolean(state.reviewOptionsLoading)
         || elements.review_mode.value === "worktree" || ![...elements.review_ref.options].some((option) => option.value);
     elements.review_list_refresh.disabled = busy || Boolean(state.reviewOptionsLoading);
@@ -6554,8 +6553,6 @@ async function loadReviewOptions({ append = false, selectedRef = null, refresh =
     const epoch = (state.reviewOptionsEpoch || 0) + 1;
     state.reviewOptionsEpoch = epoch;
     const mode = elements.review_mode.value;
-    const remote = mode === "pr" ? elements.review_remote.value : "";
-    elements.review_remote.classList.toggle("hidden", mode !== "pr" || elements.review_remote.options.length < 2);
     const selected = selectedRef ?? (elements.review_ref.value || null);
     elements.review_ref.classList.remove("hidden");
     elements.review_ref.required = mode !== "worktree";
@@ -6587,27 +6584,10 @@ async function loadReviewOptions({ append = false, selectedRef = null, refresh =
         const result = refresh
             ? await api("/api/review-targets/refresh", {
                 method: "POST",
-                body: JSON.stringify({ mode, ...(remote ? { remote } : {}) }),
+                body: JSON.stringify({ mode }),
             })
-            : await api(`/api/review-targets?mode=${mode}&page=${page}${remote ? `&remote=${encodeURIComponent(remote)}` : ""}`);
+            : await api(`/api/review-targets?mode=${mode}&page=${page}`);
         if (epoch !== state.reviewOptionsEpoch) return;
-        if (mode === "pr" && result.remotes) {
-            elements.review_remote.replaceChildren();
-            if (result.requires_remote) {
-                const placeholder = el("option", "", "Choose a PR remote...");
-                placeholder.value = "";
-                placeholder.disabled = true;
-                placeholder.selected = true;
-                elements.review_remote.append(placeholder);
-            }
-            for (const item of result.remotes) {
-                const option = el("option", "", `${item.name} · ${item.label}`);
-                option.value = item.name;
-                elements.review_remote.append(option);
-            }
-            if (result.selected_remote) elements.review_remote.value = result.selected_remote;
-            elements.review_remote.classList.toggle("hidden", result.remotes.length < 2);
-        }
         const existing = new Set([...elements.review_ref.options].map((option) => option.value));
         for (const item of result.items) {
             if (existing.has(item.ref)) continue;
@@ -6632,7 +6612,7 @@ async function loadReviewOptions({ append = false, selectedRef = null, refresh =
         elements.review_ref.disabled = !hasOptions;
         elements.review_more.textContent = "Load more";
         elements.review_more.classList.toggle("hidden", !result.has_more);
-        elements.review_options_status.textContent = result.requires_remote ? "Choose the repository remote whose pull requests you want to review." : hasOptions
+        elements.review_options_status.textContent = hasOptions
             ? refresh ? `${mode === "commit" ? "Commit" : "Pull request"} list refreshed.`
                 : mode === "pr" ? result.repository || "" : ""
             : mode === "commit" ? "No commits found." : "No pull requests found for this repository.";
@@ -6653,13 +6633,6 @@ async function loadReviewOptions({ append = false, selectedRef = null, refresh =
 }
 
 elements.review_mode.addEventListener("change", async () => {
-    state.reviewPickerPending = true;
-    state.reviewOpenError = null;
-    resetReviewNavigation();
-    render();
-    await loadReviewOptions({ selectedRef: "" });
-});
-elements.review_remote.addEventListener("change", async () => {
     state.reviewPickerPending = true;
     state.reviewOpenError = null;
     resetReviewNavigation();
@@ -6695,8 +6668,7 @@ async function openSelectedReview() {
     try {
         await api("/api/review-target", {
             method: "POST",
-            body: JSON.stringify({ mode: elements.review_mode.value, ref: elements.review_ref.value,
-                ...(elements.review_mode.value === "pr" && elements.review_remote.value ? { remote: elements.review_remote.value } : {}) }),
+            body: JSON.stringify({ mode: elements.review_mode.value, ref: elements.review_ref.value }),
         });
         state.reviewPickerPending = false;
         resetReviewNavigation();
@@ -6740,9 +6712,6 @@ elements.repository_picker_form.addEventListener("submit", async (event) => {
         resetReviewNavigation();
         state.reviewTargetKey = null;
         state.reviewPickerPending = true;
-        state.reviewOptionsEpoch = (state.reviewOptionsEpoch || 0) + 1;
-        elements.review_remote.replaceChildren();
-        elements.review_remote.classList.add("hidden");
         state.customPrompts = [];
         state.customLibraryError = null;
         elements.repository_picker.close();

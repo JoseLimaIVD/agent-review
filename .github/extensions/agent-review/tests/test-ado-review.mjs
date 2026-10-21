@@ -92,26 +92,34 @@ test("ADO client confines bearer credentials to validated endpoints and exposes 
     }), /Install Azure CLI and run az login/);
 });
 
-test("ADO PR list selects origin, paginates and does not fake last-updated timestamps", async () => {
+test("ADO PR list uses the clone's origin, paginates and does not fake last-updated timestamps", async () => {
     const { client, calls } = fakeAdo();
-    const run = async (command) => {
+    const run = async (command, args) => {
         assert.equal(command, "git");
-        return { stdout: "origin\thttps://dev.azure.com/example/Project%20One/_git/sample (fetch)\n" };
+        assert.deepEqual(args.slice(-3), ["remote", "get-url", "origin"]);
+        return { stdout: "https://example.visualstudio.com/DefaultCollection/Project%20One/_git/sample\n" };
     };
     const result = await listReviewTargets("C:\\repo", { mode: "pr", page: 2 }, run, { adoClient: client });
     assert.equal(result.items.length, 30);
     assert.equal(result.has_more, true);
     assert.equal(result.provider, "ado");
-    assert.equal(result.selected_remote, "origin");
     assert.equal(result.items[0].ref, url);
     assert.equal(result.items[0].date_kind, "created");
     assert.equal(result.items[0].draft, true);
     assert.equal(calls[1].options.query.$skip, "60");
-    const ambiguous = await listReviewTargets("C:\\repo", { mode: "pr" }, async () => ({
-        stdout: "a\thttps://dev.azure.com/example/Project%20One/_git/sample (fetch)\nb\thttps://github.com/example/sample.git (fetch)\n",
-    }));
-    assert.equal(ambiguous.requires_remote, true);
-    assert.equal(ambiguous.remotes.length, 2);
+    for (const origin of ["https://github.com/example/sample.git", null]) {
+        const gh = [];
+        const github = await listReviewTargets("C:\\repo", { mode: "pr" }, async (command, args) => {
+            if (command === "git") {
+                if (!origin) throw new Error("error: No such remote 'origin'");
+                return { stdout: `${origin}\n` };
+            }
+            gh.push(args);
+            return { stdout: args[0] === "repo" ? '{"nameWithOwner":"example/sample"}' : "[]" };
+        }, { adoClient: async () => assert.fail("GitHub origins must not call Azure DevOps") });
+        assert.equal(github.repository, "example/sample");
+        assert.ok(gh.length >= 2, "non-ADO origins keep the existing GitHub flow");
+    }
 });
 
 test("ADO resolves source/target Git objects rather than synthetic merge refs; validates identities", async () => {
@@ -165,7 +173,7 @@ test("closed ADO PRs retain their pinned snapshot even after branches move or ar
         assert.equal(snapshot.target, target);
         assert.ok(calls.every((call) => call.suffix !== "/refs"), "closed PRs do not require live branch refs");
         const result = await listReviewTargets("C:\\repo", { mode: "pr" }, async () => ({
-            stdout: "origin\thttps://dev.azure.com/example/Project%20One/_git/sample (fetch)\n",
+            stdout: "https://dev.azure.com/example/Project%20One/_git/sample\n",
         }), { adoClient: client });
         assert.equal(result.items[0].status, status);
         assert.equal(result.items[0].date_kind, "closed");
@@ -190,6 +198,19 @@ test("ADO fork metadata resolves a distinct source repository before fetching", 
     }, { adoClient: client });
     assert.equal(resolved.sourceRepository.repositoryId, forkId);
     assert.ok(calls.some((args) => args.includes("https://dev.azure.com/example/Fork%20Project/_git/fork")));
+});
+
+test("ADO objects are fetched over SSH when the clone's origin uses an ADO SSH remote", async () => {
+    const { client } = fakeAdo();
+    const calls = [];
+    await resolveReviewTarget("C:\\repo", { mode: "pr", ref: url }, async (_, args) => {
+        calls.push(args);
+        if (args.includes("get-url")) return { stdout: "git@ssh.dev.azure.com:v3/example/Project%20One/sample\n" };
+        return { stdout: args.includes("merge-base") ? common : "" };
+    }, { adoClient: client });
+    const fetches = calls.filter((args) => args.includes("fetch"));
+    assert.equal(fetches.length, 2);
+    assert.ok(fetches.every((args) => args.includes("git@ssh.dev.azure.com:v3/example/Project%20One/sample")));
 });
 
 test("active ADO reviews pin the live target even when merge evaluation lags its branch", async () => {
@@ -253,7 +274,7 @@ test("ADO real-Git review preserves dirty files, index and branch; publishing is
     const before = (await git("status", "--porcelain=v1")).stdout;
     const indexBefore = (await git("write-tree")).stdout;
     const command = async (file, args, options) => {
-        if (args.includes("remote")) return { stdout: "origin\thttps://dev.azure.com/example/Project%20One/_git/sample (fetch)\n" };
+        if (args.includes("get-url")) return { stdout: "https://dev.azure.com/example/Project%20One/_git/sample\n" };
         if (args.includes("fetch")) {
             const updated = [...args];
             updated[updated.length - 2] = repo;
@@ -303,21 +324,20 @@ test("ADO handoff never reaches the GitHub publisher, even through direct HTTP s
     assert.equal(posts, 0);
 });
 
-test("ADO list endpoint uses the selected remote and PR cache keys distinguish provider and identity", async (t) => {
+test("ADO list endpoint uses the clone's origin and PR cache keys distinguish provider and identity", async (t) => {
     const { repo } = await gitRepository(t);
     const { client } = fakeAdo();
     const state = new ReviewState(repo, { adoClient: client, runTargetCommand: async () => ({
-        stdout: "origin\thttps://dev.azure.com/example/Project%20One/_git/sample (fetch)\n",
+        stdout: "https://dev.azure.com/example/Project%20One/_git/sample\n",
     }) });
     const server = await startReviewServer(state);
     t.after(async () => { await server.close(); await state.dispose(); });
     for (const refresh of [false, true]) {
-        const response = await fetch(`${server.url}api/review-targets${refresh ? "/refresh" : "?mode=pr&remote=origin"}`,
-            refresh ? { method: "POST", body: JSON.stringify({ mode: "pr", remote: "origin" }) } : {});
+        const response = await fetch(`${server.url}api/review-targets${refresh ? "/refresh" : "?mode=pr"}`,
+            refresh ? { method: "POST", body: JSON.stringify({ mode: "pr" }) } : {});
         assert.equal(response.status, 200);
         const result = await response.json();
         assert.equal(result.provider, "ado");
-        assert.equal(result.selected_remote, "origin");
         assert.equal(result.items[0].ref, url);
     }
     const other = { mode: "pr", provider: "ado", url, currentRef: source, baseRef: common };
