@@ -1,4 +1,5 @@
 import { baseTestId, callablesForSubject, evidenceCounts, pathEvidence } from "./decision-map.mjs";
+import { summarizeAnalysisWarnings } from "./analysis-limitations.mjs";
 import { impactSlice } from "./impact-model.mjs";
 import { countLabel } from "./count-format.mjs";
 
@@ -63,7 +64,11 @@ export function reviewContext(model, { path, selected, decisionMap, run, annotat
     if (!callables.length) gaps.push("Per-path test evidence is unavailable for this selection.");
     if (run?.stale) gaps.push("The recorded test run predates worktree changes; rerun before relying on its results.");
     if (decisionMap?.status === "error") gaps.push(`Code-path analysis failed: ${decisionMap.error}`);
-    if (model.warnings?.length) gaps.push(`${countLabel(model.warnings.length, "saved analyzer limitation")} in the change overview.`);
+    // Name what affects this file; repository-wide unlinked library calls are summarized on the Overview, not counted here.
+    const notes = summarizeAnalysisWarnings(model.warnings || []);
+    const unlinkedHere = notes.byPath.get(path) || 0;
+    if (unlinkedHere) gaps.push(`Static analysis could not link ${countLabel(unlinkedHere, "call or import", "calls or imports")} in this file to saved source, usually external libraries; impact through them is unknown.`);
+    if (notes.other.length) gaps.push(`${countLabel(notes.other.length, "saved analyzer limitation")} in the change overview.`);
     if (annotation?.source_scope?.current_complete === false || annotation?.source_scope?.base_complete === false
         || annotation?.source_scope?.limits?.omitted_diff_hunks || annotation?.source_scope?.limits?.omitted_related_symbols) {
         gaps.push("The AI explanation used bounded excerpts; ask for a deeper walkthrough to retrieve more saved source.");

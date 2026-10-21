@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { describeAnalysisWarning } from "../web/analysis-limitations.mjs";
+import { describeAnalysisWarning, summarizeAnalysisWarnings, unlinkedSentence } from "../web/analysis-limitations.mjs";
+import { reviewContext } from "../web/review-presentation.mjs";
 import { analyzeSnapshot } from "../node-compiler.mjs";
 
 const model = { source_files: {
@@ -8,6 +9,27 @@ const model = { source_files: {
     "src/ReviewPolicy/ReviewPolicy.csproj": { current: "" },
     "tests/Tests.csproj": { current: "" },
 } };
+
+test("library calls that cannot be linked are summarized apart from real limitations", () => {
+    const warnings = [
+        ...Array.from({ length: 5 }, (_, index) => `[Base/current] web/a.test.jsx:${index + 1}: unresolved call expect; target is unknown.`),
+        "[Base/current] web/a.test.jsx:9: unresolved call it; target is unknown.",
+        "[Current] src/app.ts:3: unresolved module react; target is unknown.",
+        "[Base/current] src/app.ts:7: unresolved call (items || [])\n    .map; target is unknown.",
+        "Rust coverage ignored: add rust-coverage.json with revision, report, and source_hashes evidence.",
+    ];
+    const notes = summarizeAnalysisWarnings(warnings);
+    assert.deepEqual([notes.calls, notes.imports, notes.unlinked, notes.other.length], [7, 1, 8, 1]);
+    assert.deepEqual(notes.top.slice(0, 2), ["expect", "it"]);
+    assert.equal(notes.byPath.get("src/app.ts"), 2);
+    assert.equal(notes.ordered[0], warnings.at(-1), "real limitations are listed first");
+    assert.match(unlinkedSentence(notes), /could not link 7 calls and 1 import to saved source \(most often expect, it/);
+    assert.equal(summarizeAnalysisWarnings(warnings), notes, "summaries are cached per warning list");
+    const gaps = reviewContext({ nodes: [], edges: [], warnings }, { path: "src/app.ts" }).gaps.join(" ");
+    assert.match(gaps, /could not link 2 calls or imports in this file/);
+    assert.match(gaps, /1 saved analyzer limitation in the change overview/);
+    assert.doesNotMatch(gaps, /9 saved analyzer/);
+});
 
 test("unresolved call notes explain uncertainty and retain baseline source locations", () => {
     const note = describeAnalysisWarning("[Base] src/resolver.js:2: unresolved call reference.title.trim; target is unknown.", model);

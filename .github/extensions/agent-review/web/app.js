@@ -10,7 +10,7 @@ import { parseReviewLocation, reviewLocation } from "/review-location.mjs";
 import { annotationSections, conciseReviewText, overviewBlurb, reviewCommands, reviewContext, reviewItemEvidence, reviewSignal } from "/review-presentation.mjs";
 import { isReviewSymbol, isTestPath, languageForPath } from "/languages.mjs";
 import { ConnectionFeedback } from "/connection-feedback.mjs";
-import { describeAnalysisWarning } from "/analysis-limitations.mjs";
+import { describeAnalysisWarning, summarizeAnalysisWarnings, unlinkedSentence } from "/analysis-limitations.mjs";
 import { buildReviewPlan, concernPriorities } from "/review-plan.mjs";
 import { fileTree, groupForSource, reviewSequence, workspaceNavigation } from "/review-workspace.mjs";
 import { countLabel, plural } from "/count-format.mjs";
@@ -317,7 +317,7 @@ function bulkReviewLink(entry, text) {
         elements.group_review_error.classList.add("hidden");
         elements.group_review_title.textContent = `Mark ${entry.files.length} files reviewed`;
         elements.group_review_scope.textContent = `${entry.title}. This includes every changed file in this group, not just files matching the current filter. Existing notes are kept.`;
-        elements.group_review_confirm.disabled = !state.progressReady || state.progressSaving;
+        elements.group_review_confirm.disabled = !state.progressReady || savingDecision();
         elements.group_review_dialog.showModal();
     });
     return mark;
@@ -402,8 +402,17 @@ function renderWorkspaceNavigation() {
             const heading = el("summary", "workspace-layer-heading");
             const name = el("span", "workspace-layer-name");
             const title = layerTitle(layer);
-            name.append(el("span", "workspace-layer-number", layer.number ? String(layer.number) : "·"),
-                titleWithBadge(title, title !== layer.name, "AI-written step title; the area name is shown below"));
+            // The title opens the layer at its next unreviewed file; the triangle and number still expand or collapse it.
+            const openTitle = el("button", "workspace-layer-open");
+            openTitle.type = "button";
+            openTitle.title = `Open ${layerLabel(layer)} at its next unreviewed file`;
+            openTitle.append(titleWithBadge(title, title !== layer.name, "AI-written step title; the area name is shown below"));
+            openTitle.addEventListener("click", (event) => {
+                event.preventDefault();
+                section.open = true;
+                openLayer(navigation, layer);
+            });
+            name.append(el("span", "workspace-layer-number", layer.number ? String(layer.number) : "·"), openTitle);
             const meta = el("span", "workspace-layer-meta");
             if (title !== layer.name) meta.append(el("span", "", layer.name));
             if (layer.path && layer.path !== "/" && !layer.supporting) meta.append(el("code", "", layer.path));
@@ -1071,8 +1080,10 @@ function renderSummary(model) {
     if (!model.coverage?.available) qualityIssues.push(historical
         ? "Coverage is unavailable for this historical snapshot. Working-tree coverage reports are not applied to commit or PR reviews."
         : `No usable coverage report for this worktree snapshot. ${coveragePrerequisite}, then Reanalyze.`);
-    if (warnings.length) qualityIssues.push(
-        `${countLabel(warnings.length, "static-analysis note")} ${plural(warnings.length, "describes", "describe")} what could not be verified.`);
+    const notes = summarizeAnalysisWarnings(warnings);
+    if (notes.other.length) qualityIssues.push(
+        `${countLabel(notes.other.length, "static-analysis note")} ${plural(notes.other.length, "describes", "describe")} what could not be verified.`);
+    if (notes.unlinked) qualityIssues.push(unlinkedSentence(notes));
     elements.overview_limitation.replaceChildren();
     elements.overview_limitation.classList.toggle("hidden", !qualityIssues.length);
     if (qualityIssues.length) {
@@ -1081,7 +1092,7 @@ function renderSummary(model) {
             state.selected = {
                 id: "analysis-quality", kind: "analysis", name: "Analysis limitations",
                 reason: qualityIssues.join("\n"),
-                analysis_warnings: warnings,
+                analysis_warnings: notes.ordered,
             };
             // The detail pane lives in the workspace; open it there so the limitation is visible in one click.
             if (state.reviewPage !== "review" || !state.exploring) {
@@ -1426,15 +1437,26 @@ function flushReviewCursor() {
     persistReviewEntries(new Map(state.reviewLedger), stored, { quiet: true }).then((saved) => { if (saved) renderReviewOverview(); });
 }
 
-async function persistReviewEntries(entries, cursor = currentReviewCursor(), { quiet = false } = {}) {
+// Only decision saves show "Saving…" and lock the footer; reading-position saves happen silently in the background.
+function savingDecision() {
+    return state.progressSaving && !state.progressSavingBackground;
+}
+
+async function persistReviewEntries(entries, cursor = currentReviewCursor(), { quiet = false, background = false } = {}) {
+    // A background reading-position save never blocks a decision: wait for it to finish, then save the decision.
+    if (!background && state.progressSaving && state.progressSavingBackground) await state.progressSavePromise?.catch(() => {});
     if (!state.progressReady || state.progressSaving) {
+        if (background) return false;
         showError(new Error(state.progressSaving ? "Wait for the current review decision to save." : "Reload saved progress before recording a decision."));
         return false;
     }
     const key = state.reviewLedgerStorageKey;
     state.progressSaving = true;
+    state.progressSavingBackground = background;
+    let settle;
+    state.progressSavePromise = new Promise((resolve) => { settle = resolve; });
     state.progressError = null;
-    renderFileReview();
+    if (!background) renderFileReview();
     const save = (revision, values) => api("/api/review-progress", { method: "POST",
         body: JSON.stringify({ snapshot: key, revision, entries: Object.fromEntries(values), cursor }) });
     try {
@@ -1475,7 +1497,11 @@ async function persistReviewEntries(entries, cursor = currentReviewCursor(), { q
         }
         return false;
     } finally {
-        if (state.reviewLedgerStorageKey === key) state.progressSaving = false;
+        if (state.reviewLedgerStorageKey === key) {
+            state.progressSaving = false;
+            state.progressSavingBackground = false;
+        }
+        settle();
         renderFileReview();
     }
 }
@@ -1609,7 +1635,7 @@ function renderFileReview() {
         elements.file_review_note.value = record.note || "";
     }
     // A decision can only apply to a file whose source has finished loading.
-    const disabled = !state.progressReady || state.progressSaving || Boolean(state.pendingSource) || Boolean(state.advancing);
+    const disabled = !state.progressReady || savingDecision() || Boolean(state.pendingSource) || Boolean(state.advancing);
     for (const element of [elements.file_review_disposition, elements.file_review_note, elements.file_review_save, elements.file_review_next]) element.disabled = Boolean(disabled);
     const verb = elements.file_review_disposition.value === "pending" ? "Mark reviewed"
         : elements.file_review_disposition.value === "follow-up" ? "Save follow-up" : "Save";
@@ -1618,16 +1644,16 @@ function renderFileReview() {
         : target ? `${verb} & next: ${target.split("/").at(-1)}` : `${verb} & finish`;
     elements.file_review_next.title = target ? `Then opens ${target} (M)` : target === null ? "Then opens the review summary (M)" : "Save and open the next file (M)";
     elements.file_review_status.textContent = state.progressError ? `Not saved: ${state.progressError}`
-        : state.progressLoading ? "Restoring session progress…" : state.progressSaving ? "Saving…"
+        : state.progressLoading ? "Restoring session progress…" : savingDecision() ? "Saving…"
             : state.fileReviewDrafts.has(key) ? "Unsaved whole-file decision"
             : state.progressDurable ? "Saved" : "Memory-only progress";
     // On a pull request, report whether GitHub's "Viewed" checkbox followed the last decision on this file.
     const viewedSync = state.githubViewed;
-    if (viewedSync && (viewedSync.paths || []).includes(state.source?.path) && !state.progressError && !state.progressSaving && !state.fileReviewDrafts.has(key)) {
+    if (viewedSync && (viewedSync.paths || []).includes(state.source?.path) && !state.progressError && !savingDecision() && !state.fileReviewDrafts.has(key)) {
         elements.file_review_status.textContent = viewedSync.message ? `Saved · ${viewedSync.message}` : "Saved · Viewed on GitHub updated";
     }
     elements.file_review_status.title = state.progressDurable ? "Progress is saved in this session workspace" : "Progress is memory-only until this provider closes";
-    elements.file_review_status.dataset.quiet = String(!state.progressError && !state.progressLoading && !state.progressSaving
+    elements.file_review_status.dataset.quiet = String(!state.progressError && !state.progressLoading && !savingDecision()
         && !state.fileReviewDrafts.has(key) && Boolean(state.progressDurable));
     elements.file_review_retry.classList.toggle("hidden", !state.progressError);
 }
@@ -1791,7 +1817,7 @@ function renderFinishReview() {
     } else if (drafted) panel.append(el("p", "muted", `${countLabel(drafted, "line comment")} drafted; they are included in the handoff summary.`));
     const handoff = el("button", next ? "review-next review-secondary" : "review-next", pr?.available ? "Review & submit to pull request" : "Preview / export handoff");
     handoff.type = "button";
-    handoff.disabled = !state.progressReady || state.progressSaving;
+    handoff.disabled = !state.progressReady || savingDecision();
     handoff.addEventListener("click", () => openReviewHandoff());
     panel.append(handoff);
 }
@@ -2016,7 +2042,7 @@ function queueReviewCursor() {
         if (snapshot !== state.reviewLedgerStorageKey || state.progressSaving || !state.source) return;
         const cursor = currentReviewCursor();
         if (JSON.stringify(cursor) === JSON.stringify(state.savedReviewCursor)) return;
-        persistReviewEntries(new Map(state.reviewLedger), cursor, { quiet: true });
+        persistReviewEntries(new Map(state.reviewLedger), cursor, { quiet: true, background: true });
     }, 800);
 }
 elements.source.addEventListener("scroll", () => { sourceScrollPosition(); queueReviewCursor(); }, { passive: true });
@@ -3618,7 +3644,7 @@ function appendInlineMarkdown(container, text, options = {}) {
             const reference = options.sourceReferences === false ? null : parseSourceReference(value);
             const symbol = options.sourceReferences === false || reference ? null : resolveSymbolReference(state.payload?.model, value, markdownContext.subject);
             if (reference) {
-                container.append(sourceReferenceButton(value, reference));
+                container.append(sourceReferenceButton(sourceReferenceLabel(reference), reference));
             } else if (symbol) {
                 container.append(sourceReferenceButton(value, {
                     path: symbol.path,
@@ -3649,6 +3675,17 @@ function intentLink(label, attribution) {
     button.addEventListener("click", () => openSessionHistory(attribution.original_prompt_event_id
         ? { ...attribution, prompt_event_id: attribution.original_prompt_event_id } : attribution));
     return button;
+}
+
+// Links show the repository-relative path and lines, whatever form the text used (absolute, backslashes, bare name).
+function sourceReferenceLabel(reference) {
+    const ranges = [];
+    for (const line of reference.lines || []) {
+        const last = ranges.at(-1);
+        if (last && line === last[1] + 1) last[1] = line;
+        else ranges.push([line, line]);
+    }
+    return `${reference.path}${ranges.length ? `:${ranges.map(([from, to]) => from === to ? from : `${from}-${to}`).join(",")}` : ""}`;
 }
 
 function sourceReferenceButton(label, reference, title = null) {
@@ -3685,12 +3722,12 @@ async function openSourceReference(reference, { focus = false, tab = reference.s
 }
 
 function appendTextWithSourceReferences(container, text) {
-    const pattern = /((?:[A-Za-z0-9_.-]+[\\/])*[A-Za-z0-9_.-]+\.(?:csproj|cs|slnx?|props|targets|py|toml|txt|json|ya?ml|md|[cm]?[jt]sx?|css|html)(?![A-Za-z0-9_])(?::\d+(?:-\d+)?(?:,\d+(?:-\d+)*)*)?)/g;
+    const pattern = /((?:[A-Za-z]:[\\/])?(?:[A-Za-z0-9_.-]+[\\/])*[A-Za-z0-9_.-]+\.(?:csproj|cs|slnx?|props|targets|py|toml|txt|json|ya?ml|md|[cm]?[jt]sx?|css|html)(?![A-Za-z0-9_])(?::\d+(?:-\d+)?(?:,\d+(?:-\d+)*)*)?)/g;
     let offset = 0;
     for (const match of text.matchAll(pattern)) {
         if (match.index > offset) container.append(document.createTextNode(text.slice(offset, match.index)));
         const reference = parseSourceReference(match[0]);
-        container.append(reference ? sourceReferenceButton(match[0], reference) : document.createTextNode(match[0]));
+        container.append(reference ? sourceReferenceButton(sourceReferenceLabel(reference), reference) : document.createTextNode(match[0]));
         offset = match.index + match[0].length;
     }
     if (offset < text.length) container.append(document.createTextNode(text.slice(offset)));

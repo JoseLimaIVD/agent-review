@@ -1599,6 +1599,8 @@ h3 { font-size: 14px; font-weight: 600; }
   color: var(--cp-link);
   font-size: 85%;
   text-decoration: none;
+  text-align: left;
+  overflow-wrap: anywhere;
 }
 .intent-link { font-size: inherit; font-weight: 600; }
 .source-reference:hover, .source-reference:focus-visible, .intent-link:hover, .intent-link:focus-visible { text-decoration: underline; color: var(--cp-link); }
@@ -2090,6 +2092,9 @@ body:not(.reviewing):not(.finishing-review) #workspace-freshness, body:not(.revi
 .workspace-layer-name { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; overflow-wrap: break-word; }
 .workspace-layer-name::before { content: ""; flex: 0 0 auto; width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid var(--cp-text-muted); transition: transform .12s ease; }
 .workspace-layer:not([open]) .workspace-layer-name::before { transform: rotate(-90deg); }
+.workspace-layer-open { min-width: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; overflow-wrap: break-word; }
+.workspace-layer-open:hover strong { color: var(--cp-link); text-decoration: underline; }
+.workspace-layer-open:focus-visible { outline: 2px solid var(--cp-link); outline-offset: 2px; border-radius: 4px; }
 .workspace-layer-number { flex: 0 0 auto; display: inline-grid; place-items: center; width: 20px; height: 20px; border: 1px solid var(--cp-border-strong); border-radius: 50%; color: var(--cp-text-muted); font-size: 11px; font-weight: 600; }
 .workspace-layer-progress { font-size: 12px; font-variant-numeric: tabular-nums; }
 .workspace-layer-meta { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px 8px; padding-left: 44px; color: var(--cp-text-muted); font-size: 11px; }

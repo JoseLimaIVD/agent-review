@@ -5,6 +5,7 @@ import { REVIEW_DISPOSITIONS, fileReviewId, fileReviewProgress, isConcernSetAsid
 import { groupFindings } from "./web/findings.mjs";
 import { countLabel } from "./web/count-format.mjs";
 import { baseTestId, layerTestStatus } from "./web/decision-map.mjs";
+import { summarizeAnalysisWarnings, unlinkedSentence } from "./web/analysis-limitations.mjs";
 
 // One line per layer saying whether its linked tests were run in this review and how they came out.
 function layerTestLine(status) {
@@ -149,6 +150,7 @@ export function createReviewHandoff(model, target, progress, { testRun, warnings
         if (narrower.length > 20) lines.push(`- ${narrower.length - 20} additional scoped records are in the JSON state.`);
     }
     lines.push("", "## Verification and limits");
+    const notes = summarizeAnalysisWarnings(warnings);
     const recorded = testRun?.status === "complete" || (testRun?.status === "running" && testRun.tests?.length);
     if (recorded) {
         const results = ["passed", "failed", "error", "skipped"].map((key) => `${testRun.counts?.[key] || 0} ${key}`).join(", ");
@@ -172,7 +174,7 @@ export function createReviewHandoff(model, target, progress, { testRun, warnings
     }
     lines.push(`- Aggregate coverage report: ${model.coverage?.available ? "available; not named-test or per-path proof" : "not available"}.`,
         `- ${countLabel(allConcerns.length, "saved review concern")} (${concerns.length} open), not confirmed defects. Concern triage saved in this session is included above; dismissals made only in the browser are not.`,
-        `- ${countLabel(warnings.length, "saved analyzer limitation")}. AI explanations are interpretations, not proof.`,
+        `- ${countLabel(notes.other.length, "saved analyzer limitation")}.${notes.unlinked ? ` ${unlinkedSentence(notes)}` : ""} AI explanations are interpretations, not proof.`,
         `- The summary includes file names, human review notes${layers?.some((layer) => layer.title || layer.intent) ? ", and AI-written layer titles and one-line layer summaries (each marked)" : ""}. The JSON contains decisions (file and concern triage), notes, the reading position and the source identity. Neither includes source bodies, per-item AI explanations, originating prompts or discussion transcripts.`,
         "- JSON restores decisions only into an exact matching loaded snapshot; it is not a self-contained source archive or a durable canvas link.",
         ...(!importable ? ["- Decision import is unavailable: this worktree contains changed binary or unsnapshotted files whose exact content cannot be established from saved text."] : []),

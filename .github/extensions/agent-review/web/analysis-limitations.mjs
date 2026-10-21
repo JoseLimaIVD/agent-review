@@ -1,4 +1,43 @@
 import { resolveSourceReference } from "./source-references.mjs";
+import { countLabel } from "./count-format.mjs";
+
+const UNLINKED = /^(?:\[(?:Base|Current|Base\/current)\]\s*)?(?:(.*?):\d+:\s*)?unresolved (call|module|heritage) (.+?); target is unknown\.?$/s;
+const summaries = new WeakMap();
+
+// Most static-analysis notes in a JavaScript/TypeScript repository are calls into external libraries and test frameworks
+// (expect, it, useState) that have no saved source to link to. They are counted and named once, separately from the
+// notes that describe a real gap in the analysis.
+export function summarizeAnalysisWarnings(warnings = []) {
+    if (summaries.has(warnings)) return summaries.get(warnings);
+    const counts = { call: 0, module: 0, heritage: 0 };
+    const subjects = new Map();
+    const byPath = new Map();
+    const other = [];
+    const unlinked = [];
+    for (const warning of warnings) {
+        const match = UNLINKED.exec(String(warning));
+        if (!match) { other.push(warning); continue; }
+        unlinked.push(warning);
+        counts[match[2]]++;
+        const subject = match[3].split(/[\s(]/)[0].slice(0, 40);
+        subjects.set(subject, (subjects.get(subject) || 0) + 1);
+        if (match[1]) byPath.set(match[1], (byPath.get(match[1]) || 0) + 1);
+    }
+    const summary = { calls: counts.call, imports: counts.module, inheritance: counts.heritage, unlinked: unlinked.length,
+        top: [...subjects].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([name]) => name), byPath, other,
+        // Real limitations first, then the unlinked references, so a long list opens on what matters.
+        ordered: [...other, ...unlinked] };
+    if (Array.isArray(warnings)) summaries.set(warnings, summary);
+    return summary;
+}
+
+export function unlinkedSentence(summary) {
+    if (!summary.unlinked) return "";
+    const parts = [summary.calls ? countLabel(summary.calls, "call") : null, summary.imports ? countLabel(summary.imports, "import") : null,
+        summary.inheritance ? countLabel(summary.inheritance, "base type") : null].filter(Boolean);
+    const list = parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}` : parts[0];
+    return `Static analysis could not link ${list} to saved source${summary.top.length ? ` (most often ${summary.top.join(", ")})` : ""}. These are usually external libraries or test frameworks; impact through them is unknown, not broken.`;
+}
 
 export function describeAnalysisWarning(warning, model) {
     const raw = String(warning);
