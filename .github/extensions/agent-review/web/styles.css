@@ -600,14 +600,17 @@ marker path { fill: var(--cp-border-strong); }
 .evidence-link {
   padding: 6px 7px;
   border: 1px solid var(--cp-border);
-  border-radius: .625rem;
+  border-radius: 6px;
   background: var(--cp-surface);
   color: var(--cp-link);
   text-align: left;
   font: 9px Consolas, "Courier New", Courier, monospace;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   cursor: pointer;
 }
+.evidence-link:hover { background: var(--cp-surface-soft); }
+.evidence-link:focus-visible { outline: 2px solid var(--cp-link); outline-offset: 1px; }
+.impact-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .source-panel {
   position: fixed;
   inset: 0;
@@ -733,6 +736,19 @@ body.reviewing .source-heading .eyebrow { display: none; }
 .code-lines { width: max-content; min-width: 100%; }
 .impact-toolbar { padding: 12px; border-bottom: 1px solid var(--cp-border); overflow-wrap: anywhere; }
 .impact-toolbar select, .impact-toolbar button { max-width: 100%; margin: 6px 8px 0 0; }
+/* GitHub (Primer) default button. Classless buttons get the same look at zero specificity, so any contextual style
+   (rail titles, breadcrumbs, finder rows, dialogs) still takes precedence over it. */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 28px; padding: 3px 12px;
+  border: 1px solid var(--cp-border); border-radius: 6px; background: var(--cp-surface); color: var(--cp-text);
+  font: inherit; font-size: 12px; font-weight: 500; line-height: 20px; white-space: nowrap; cursor: pointer; }
+.btn:hover:not(:disabled) { background: var(--cp-surface-soft); }
+.btn:focus-visible { outline: 2px solid var(--cp-link); outline-offset: 1px; }
+.btn:disabled { color: var(--cp-text-muted); cursor: not-allowed; }
+:where(button:not([class])) { padding: 3px 12px; border: 1px solid var(--cp-border); border-radius: 6px; background: var(--cp-surface);
+  color: var(--cp-text); font: inherit; cursor: pointer; }
+:where(button:not([class])):hover:not(:disabled) { background: var(--cp-surface-soft); }
+:where(button:not([class])):focus-visible { outline: 2px solid var(--cp-link); outline-offset: 1px; }
+:where(button:not([class])):disabled { color: var(--cp-text-muted); cursor: not-allowed; }
 .impact-graph { min-height: 440px; }
 .impact-evidence { margin-top: 12px; overflow-wrap: anywhere; }
 .discussion-tabs { display: flex; gap: 6px; margin-bottom: 10px; }

@@ -1133,7 +1133,9 @@ function evidenceLabel(id) {
 }
 
 function evidenceButton(id) {
-    const button = el("button", "evidence-link", evidenceLabel(id));
+    const button = el("button", "evidence-link");
+    // Long paths wrap at separators rather than inside a file name or line number.
+    for (const part of String(evidenceLabel(id)).split(/(?<=[/._\- ])/)) button.append(document.createTextNode(part), document.createElement("wbr"));
     button.type = "button";
     button.title = id;
     button.addEventListener("click", () => selectItem({ id, kind: "evidence" }, false));
@@ -2180,7 +2182,7 @@ function renderImpact(model, focus = null) {
         direction.append(option);
     }
     direction.addEventListener("change", () => { state.impact.direction = direction.value; renderImpact(model, "direction"); });
-    const expand = el("button", "", `Expand one step (${options.depth || 1}/4)`);
+    const expand = el("button", "btn", `Expand one step (${options.depth || 1}/4)`);
     expand.type = "button";
     expand.disabled = options.depth >= 4 || !slice.boundary;
     expand.addEventListener("click", () => { state.impact.depth++; renderImpact(model, "expand"); });
@@ -2212,20 +2214,22 @@ function renderImpact(model, focus = null) {
             evidence.append(el("p", "", `${source?.name || edge.source} ${edge.change === "removed" ? `formerly ${edge.type} (base snapshot)` : edge.type} ${target?.name || edge.target} · relationship confidence: ${edge.confidence || "not reported"}`));
             for (const id of edge.evidence_ids || []) if (model.evidence?.[id]) evidence.append(evidenceButton(id));
         }
+        const actions = el("div", "impact-actions");
         if (item.path) {
-            const open = el("button", "", "Open source");
+            const open = el("button", "btn", "Open source");
             open.type = "button";
             open.addEventListener("click", () => {
                 state.sourceReturnFocus = [...elements.graph.querySelectorAll(".impact-graph .node")]
                     .find((node) => node.dataset.nodeId === item.id);
                 selectItem(item, false);
             });
-            evidence.append(open);
+            actions.append(open);
         }
-        const ask = el("button", "", "Ask about this");
+        const ask = el("button", "btn", "Ask about this");
         ask.type = "button";
         ask.addEventListener("click", () => discussItem(item).catch(showError));
-        evidence.append(ask);
+        actions.append(ask);
+        evidence.append(actions);
         if (item.impact_role === "Related test") evidence.append(el("p", "muted", "Static test relationship. Execution of this affected behavior is not established by this graph."));
         elements.detail.append(evidence);
     }, { viewport: true, focusId: options.seed,
@@ -2340,7 +2344,7 @@ function renderSections(model) {
     const data = ensureSectionData();
     if (!data) {
         if (state.sectionError?.key === key) {
-            const retry = el("button", "", "Retry sections");
+            const retry = el("button", "btn", "Retry sections");
             retry.type = "button";
             retry.addEventListener("click", () => { state.sectionError = null; render(); });
             elements.graph.append(el("p", "error", state.sectionError.message), retry);
@@ -3333,7 +3337,7 @@ function renderRuleCheck() {
     }
     if (rules.error) {
         details.append(el("p", "error", rules.error));
-        const retry = el("button", "", "Run again");
+        const retry = el("button", "btn", "Run again");
         retry.type = "button";
         retry.addEventListener("click", async () => {
             retry.disabled = true;

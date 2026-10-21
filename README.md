@@ -82,7 +82,8 @@ never prove a particular path ran. When a supplied coverage run measured the
 open file, the current-side gutter marks each executed and not-executed line and
 item discussion receives those exact line ranges. **Ask about this** is available beside the
 reading-pane controls, and the context/discussion switch stays visible while
-reading. Optional originating-session context is disclosed separately; errors
+reading. Originating-session context (the Copilot request that produced the code)
+sits directly beneath the AI explanation and its risk assessment; errors
 remain explicit. **Focus code** also hides the decision footer while reading.
 
 Whole-file review decisions have a clear finish line: **Not reviewed**,
