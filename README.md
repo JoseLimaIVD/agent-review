@@ -63,6 +63,20 @@ the saved call and import relationships between them, with "builds on" links.
 Each layer carries one short, AI-labelled sentence describing what the change
 does there, generated once from that layer's saved diffs; until it arrives (or
 when Copilot is unavailable) the layer lists its changed symbols instead.
+Animated line bars identify pending AI work, including layer summaries,
+overview refinement, explanations, background review and discussion answers;
+reduced-motion preferences keep the bars static. Layer headers expand or
+collapse their file lists; **Review layer** opens the next unreviewed file.
+Indented, bordered file buttons open a diff, with the current file clearly
+highlighted. The first explanation is prefetched after the overview settles,
+then the next one while reading. Opening an in-flight prefetch joins the same
+request; failures are shown and opening that file retries the explanation.
+To check these interactions against a real changed repository, set
+`AGENT_REVIEW_UX_REPO` and run
+`node .github\extensions\agent-review\tests\browser\review-prefetch.mjs`
+with the browser-tooling settings described below. It uses the production
+analyzer and server with controlled AI responses; it does not change that
+repository or call a model.
 Within a layer each changed file appears exactly once, with its consumers and
 tests listed beneath it and tagged by role (consumer, test, import-linked, or
 name-matched test); identical implementations across many files stay one

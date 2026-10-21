@@ -6,6 +6,7 @@ import { resolveSourceReference } from "/source-references.mjs";
 import { unchangedDiffContext, diffSegments } from "/diff-context.mjs";
 import { impactSlice } from "/impact-model.mjs";
 import { ItemDiscussionPane } from "/item-discussion-ui.mjs";
+import { aiPlaceholder as activityPlaceholder } from "/ai-activity.mjs";
 import { parseReviewLocation, reviewLocation } from "/review-location.mjs";
 import { annotationSections, conciseReviewText, overviewBlurb, reviewCommands, reviewContext, reviewItemEvidence, reviewSignal } from "/review-presentation.mjs";
 import { isReviewSymbol, isTestPath, languageForPath } from "/languages.mjs";
@@ -55,6 +56,7 @@ const state = {
     readingPane: "code",
     exploring: false,
     fileReviewDrafts: new Map(),
+    annotationRequests: new Map(),
 };
 const elements = Object.fromEntries([
     "source-coverage", "source-position", "diff-layout", "source-strip", "source-strip-toggle", "source-strip-body", "overview-layers", "overview-stats", "overview-limitation",
@@ -62,7 +64,7 @@ const elements = Object.fromEntries([
     "review-overview", "review-background", "overview-title", "overview-description", "overview-progress", "overview-scope", "overview-start", "overview-files",
     "review-workflow", "workflow-overview", "workflow-review", "workflow-finish", "review-finish", "workspace-target", "workspace-freshness", "workspace-find", "workspace-nav-toggle",
     "workspace-return-source", "review-navigation", "workspace-groups", "workspace-files", "workspace-search", "workspace-count",
-    "workspace-nav-list", "workspace-code", "workspace-context", "workspace-group-label", "workspace-group-retry",
+    "workspace-nav-list", "workspace-code", "workspace-context", "workspace-group-label", "workspace-group-retry", "workspace-prefetch", "overview-prefetch",
     "workspace-discuss", "workspace-comment", "source-review-context", "source-origin",
     "explore-priorities", "explore-concerns", "explore-groups", "explore-architecture", "explore-paths", "explore-packages",
     "review-progress-status", "review-progress-retry", "review-progress-backup", "file-review-form", "file-review-label",
@@ -192,6 +194,9 @@ async function returnWorkspaceSource({ code = false } = {}) {
     setDiscussionMode(!code && Boolean(saved.discussion));
     render();
     if (await renderSource()) {
+        if (state.selected && state.annotationRequests.has(`${state.payload.review_generation}:${state.selected.id}`)) {
+            ensureAnnotation(state.selected);
+        }
         elements.source.scrollTop = saved.scroll.top;
         elements.source.scrollLeft = saved.scroll.left;
         elements.source_panel.querySelector(".source-side").scrollTop = saved.scroll.side;
@@ -293,13 +298,30 @@ function ensureLayerSummaries() {
     const generation = state.payload?.review_generation;
     if (!state.payload || state.payload.annotations?.layers?.titles || state.layerSummaryRequested === generation) return;
     state.layerSummaryRequested = generation;
+    state.layerSummaryError = null;
+    state.layerSummaryLoading = true;
     api("/api/layer-summaries", { method: "POST", body: "{}" }).then((result) => {
         if (state.payload?.review_generation !== generation) return;
         state.payload.annotations = { ...(state.payload.annotations || {}), layers: result.annotation };
+    }, (error) => {
+        if (state.payload?.review_generation === generation) state.layerSummaryError = error.message;
+    }).finally(() => {
+        if (state.payload?.review_generation !== generation) return;
+        state.layerSummaryLoading = false;
         state.navigationKey = null;
         renderWorkspaceNavigation();
         renderReviewOverview();
-    }, (error) => { state.layerSummaryError = error.message; });
+    });
+}
+
+function layerSummaryStatus(container, layer, key) {
+    if (layer.supporting) return;
+    if (state.layerSummaryLoading && !state.payload.annotations?.layers?.titles) {
+        container.append(aiPlaceholder(key, "Copilot is writing layer titles and summaries...", 1));
+    } else if (state.layerSummaryError) {
+        const error = el("span", "layer-summary-error muted", `AI layer summary unavailable: ${state.layerSummaryError}`);
+        container.append(error);
+    }
 }
 
 // Long file names wrap at dots, dashes and underscores before ever breaking inside a word.
@@ -345,7 +367,7 @@ function renderWorkspaceNavigation() {
             : state.source ? "Related source outside the changed-file groups" : "Choose a group or file");
     const query = state.navigationQuery.toLowerCase().trim();
     if (data) ensureLayerSummaries();
-    const key = `${state.payload.review_generation}:${state.sectionDataKey}:${state.navigationMode}:${query}:${state.payload.annotations?.layers?.generated_at || ""}`;
+    const key = `${state.payload.review_generation}:${state.sectionDataKey}:${state.navigationMode}:${query}:${state.payload.annotations?.layers?.generated_at || ""}:${state.layerSummaryLoading}:${state.layerSummaryError}`;
     elements.workspace_groups.setAttribute("aria-pressed", String(state.navigationMode === "groups"));
     elements.workspace_files.setAttribute("aria-pressed", String(state.navigationMode === "files"));
     const storyLayers = navigation.layers.filter((item) => !item.supporting).length;
@@ -406,19 +428,20 @@ function renderWorkspaceNavigation() {
             section.open = true;
             section.dataset.layer = layer.id;
             const heading = el("summary", "workspace-layer-heading");
+            heading.title = "Expand or collapse this layer's files";
             const name = el("span", "workspace-layer-name");
             const title = layerTitle(layer);
-            // The title opens the layer at its next unreviewed file; the triangle and number still expand or collapse it.
-            const openTitle = el("button", "workspace-layer-open");
+            const openTitle = el("button", "workspace-layer-open", "Review layer");
             openTitle.type = "button";
             openTitle.title = `Open ${layerLabel(layer)} at its next unreviewed file`;
-            openTitle.append(titleWithBadge(title, title !== layer.name, "AI-written step title; the area name is shown below"));
+            openTitle.setAttribute("aria-label", `Review layer: ${layerLabel(layer)}`);
             openTitle.addEventListener("click", (event) => {
                 event.preventDefault();
                 section.open = true;
                 openLayer(navigation, layer);
             });
-            name.append(layerMarker(layer, "workspace-layer-number"), openTitle);
+            name.append(layerMarker(layer, "workspace-layer-number"),
+                titleWithBadge(title, title !== layer.name, "AI-written step title; the area name is shown below"));
             const meta = el("span", "workspace-layer-meta");
             if (title !== layer.name) meta.append(el("span", "", layer.name));
             if (layer.path && layer.path !== "/" && !layer.supporting) meta.append(el("code", "", layer.path));
@@ -442,7 +465,10 @@ function renderWorkspaceNavigation() {
                 intentLine.title = `${intent}\n\nAI interpretation of this layer's saved diff. Verify in the code.`;
             } else if (layer.summary) intentLine = el("span", "workspace-layer-intent workspace-layer-fallback", layer.summary);
             heading.append(name, progress, tests, ...(intentLine ? [intentLine] : []), meta);
-            section.append(heading);
+            const actions = el("div", "workspace-layer-actions");
+            actions.append(openTitle);
+            layerSummaryStatus(actions, layer, `layer:${layer.id}`);
+            section.append(heading, actions);
             for (const { entry, files } of layerGroups) {
                 if (entry.supporting) {
                     const tree = el("div", "workspace-supporting");
@@ -456,7 +482,9 @@ function renderWorkspaceNavigation() {
                     const details = el("details", "workspace-group");
                     details.dataset.group = entry.id;
                     const summary = el("summary", "");
-                    const open = el("button", "", entry.title);
+                    summary.append(el("strong", "", entry.title));
+                    summary.title = "Expand or collapse this group's files";
+                    const open = el("button", "workspace-group-open", "Review group");
                     open.type = "button";
                     open.title = entry.section?.summary || entry.title;
                     open.addEventListener("click", (event) => {
@@ -467,9 +495,8 @@ function renderWorkspaceNavigation() {
                     });
                     const count = el("span", "muted", String(files.length));
                     count.dataset.groupProgress = entry.id;
-                    summary.append(open);
                     if (layer.groups.length > 1) summary.append(count);
-                    details.append(summary);
+                    details.append(summary, open);
                     appendTree(details, fileTree(files), entry);
                     details.append(bulkReviewLink(entry, "Review all group files…"));
                     if (query) details.open = true;
@@ -896,19 +923,7 @@ const REVEAL_MS = 450;
 // Shimmering placeholder in the shape of the content that will replace it.
 function aiPlaceholder(key, label, lines = 3) {
     pendingAi.add(key);
-    const wrapper = el("div", "ai-pending");
-    wrapper.setAttribute("role", "status");
-    wrapper.setAttribute("aria-live", "polite");
-    const heading = el("p", "ai-pending-label");
-    heading.append(el("span", "ai-pending-dot"), document.createTextNode(label));
-    wrapper.append(heading);
-    const widths = [94, 81, 88, 67, 90, 74];
-    for (let index = 0; index < lines; index++) {
-        const bar = el("span", "ai-pending-line");
-        bar.style.width = `${widths[index % widths.length]}%`;
-        wrapper.append(bar);
-    }
-    return wrapper;
+    return activityPlaceholder(label, lines);
 }
 
 // Animate a result in only when it replaces a placeholder the reader saw. Server updates
@@ -1595,8 +1610,10 @@ async function resumeReviewCursor(cursor) {
     state.exploring = false;
     state.mode = "walkthrough";
     state.activeReviewGroup = cursor.group;
-    await openSourceReference({ path: cursor.path, lines: [cursor.line], side: cursor.side },
+    const loaded = await openSourceReference({ path: cursor.path, lines: [cursor.line], side: cursor.side },
         { focus: true, tab: cursor.tab, nav: "reset" });
+    const generated = model.changes.find((file) => file.path === cursor.path)?.generated;
+    if (loaded && !generated && !["section", "package"].includes(state.selected?.kind)) ensureAnnotation(state.selected);
 }
 
 // Where this file sits and how big it is: "+56 −8 · file 2 of 3 in 2. Apply verified export corrections".
@@ -1645,7 +1662,11 @@ function annotationIdForEntry(entry) {
     // Resuming a saved reading point reopens the exact item that was selected.
     if (entry.resume) {
         const id = entry.resume.item_id;
-        const known = id && [...model.nodes, ...(model.attention || [])].some((item) => item.id === id && (!item.path || item.path === entry.path));
+        if (id?.startsWith("section:") || id?.startsWith("package:")) return null;
+        const known = id && [...model.nodes, ...(model.edges || []), ...(model.attention || []),
+            ...(state.payload.generated_observations || [])]
+            .some((item) => item.id === id && (!item.path || item.path === entry.path));
+        if (id && model.evidence?.[id]) return id;
         return known ? id : `file:${entry.path}`;
     }
     const navigation = workspaceNavigation(model, state.sectionData);
@@ -1662,8 +1683,39 @@ function annotationIdForEntry(entry) {
     return node ? node.id : `file:${entry.path}`;
 }
 
-// Copilot starts explaining the next item while the reader is still on this one, so opening it shows the explanation
-// immediately. The server shares one generation per item, so a click on a prefetched item joins it rather than repeating it.
+function requestAnnotation(item) {
+    const generation = state.payload.review_generation;
+    const key = `${generation}:${item.id}`;
+    const cached = state.payload.annotations?.[item.id];
+    if (cached) return Promise.resolve(cached);
+    if (state.annotationRequests.has(key)) return state.annotationRequests.get(key);
+    const promise = api("/api/annotation", { method: "POST",
+        body: JSON.stringify({ id: item.id, evidence_ids: item.evidence_ids || [] }) })
+        .then(({ annotation }) => {
+            if (state.payload?.review_generation === generation) {
+                state.payload.annotations ||= {};
+                state.payload.annotations[item.id] = annotation;
+            }
+            return annotation;
+        }).finally(() => {
+            if (state.annotationRequests.get(key) === promise) state.annotationRequests.delete(key);
+        });
+    state.annotationRequests.set(key, promise);
+    return promise;
+}
+
+function renderPrefetchStatus() {
+    const status = state.prefetchStatus;
+    for (const panel of [elements.overview_prefetch, elements.workspace_prefetch]) {
+        panel.replaceChildren();
+        panel.classList.toggle("hidden", !status);
+        if (!status) continue;
+        if (status.error) panel.append(el("p", "muted", `Could not prepare ${status.path.split("/").at(-1)}. Open the file to retry. ${status.error}`));
+        else panel.append(activityPlaceholder(`Preparing next explanation: ${status.path.split("/").at(-1)}`, 1));
+    }
+}
+
+// Share the request with a click that arrives before prefetch finishes; retain the result even after navigating away.
 function prefetchAnnotation(entry) {
     const id = annotationIdForEntry(entry);
     const payload = state.payload;
@@ -1672,15 +1724,16 @@ function prefetchAnnotation(entry) {
     const key = `${payload.review_generation}:${id}`;
     if (state.prefetchedAnnotations.has(key)) return;
     state.prefetchedAnnotations.add(key);
-    api("/api/annotation", { method: "POST", body: JSON.stringify({ id, evidence_ids: [] }) })
-        .then(({ annotation }) => {
-            if (state.payload !== payload && state.payload?.review_generation !== payload.review_generation) return;
-            state.payload.annotations ||= {};
-            state.payload.annotations[id] = annotation;
-            if (state.selected?.id === id) renderAnnotation(state.selected, annotation);
-        })
-        // Unavailable or failed prefetches are not retried; opening the item still requests it and shows any error.
-        .catch(() => {});
+    const status = { id, path: entry.path };
+    state.prefetchStatus = status;
+    renderPrefetchStatus();
+    requestAnnotation({ id }).then(() => {
+        if (state.prefetchStatus === status) state.prefetchStatus = null;
+    }, (error) => {
+        if (state.prefetchStatus === status) status.error = error.message;
+    }).finally(() => {
+        if (state.payload?.review_generation === payload.review_generation) renderPrefetchStatus();
+    });
 }
 
 // Prefetch the next item shortly after a file settles, so the open file's own explanation goes first and skimming
@@ -2858,6 +2911,7 @@ function renderOverviewLayers(navigation) {
         else if (layer.summary) detail.append(document.createTextNode(layer.summary));
         if (details.length) detail.append(document.createTextNode(`${intent || layer.summary ? " · " : ""}${details.join(" · ")}`));
         row.append(detail);
+        layerSummaryStatus(row, layer, `overview-layer:${layer.id}`);
         row.setAttribute("aria-label", `${layerLabel(layer)}: ${progress.reviewed} of ${progress.total} files reviewed. ${intent || layer.summary || ""}`);
         row.addEventListener("click", () => openLayer(navigation, layer));
         const item = el("li", "");
@@ -2892,7 +2946,7 @@ function renderReviewOverview() {
         || (target?.mode === "worktree" ? "Review your uncommitted changes" : target?.label || "Review this change");
     const overviewBody = payload.annotations?.overview?.body;
     // Once the summary is on screen, Copilot starts on the first item the reader will open.
-    if (overviewBody && state.reviewPage === "overview" && state.progressReady) {
+    if ((overviewBody || state.overviewError) && state.reviewPage === "overview" && state.progressReady) {
         const destination = overviewDestination();
         if (destination) prefetchAnnotation(destination.resume ? destination : destination.entry || destination);
     }
@@ -2919,12 +2973,15 @@ function renderReviewOverview() {
             });
             (text.lastElementChild || text).append(document.createTextNode(" "), toggle);
         }
+    } else if (state.overviewLoading) {
+        elements.overview_description.append(aiPlaceholder("overview", "Copilot is preparing the overview. You can start reviewing the saved code now.", 3));
     } else {
-        elements.overview_description.append(el("p", "", state.overviewLoading
-            ? "The AI overview is being prepared. You can start with the saved code now."
-            : state.overviewError ? "The AI overview is unavailable. You can review the saved code now, or open change details to retry."
-                : "Review the saved changes and available evidence. Open change details for intent, metrics and AI summary status."));
+        elements.overview_description.append(el("p", "", state.overviewError
+            ? "The AI overview is unavailable. You can review the saved code now, or open change details to retry."
+            : "Review the saved changes and available evidence. Open change details for intent, metrics and AI summary status."));
     }
+    if (payload.annotations?.overview?.refining) elements.overview_description.append(
+        aiPlaceholder("overview-refine", "Copilot is refining this overview with deeper review evidence...", 2));
     elements.overview_progress.textContent = `${progress.reviewed} of ${countLabel(changed, "changed file")} reviewed${
         progress.followUp ? ` · ${countLabel(progress.followUp, "follow-up")}` : ""}`;
     elements.overview_scope.textContent = "";
@@ -2934,8 +2991,8 @@ function renderReviewOverview() {
         : "Review summary";
     elements.overview_start.title = next ? `Next changed file: ${next.path}` : "Review saved decisions and remaining concerns";
     const navigation = layeredNavigation();
-    renderOverviewLayers(navigation);
     if (navigation) ensureLayerSummaries();
+    renderOverviewLayers(navigation);
     const destination = overviewDestination();
     if (destination && navigation) {
         const layer = layerOf(navigation, destination);
@@ -3131,6 +3188,7 @@ function renderChangeBrief() {
                 : "Written from the saved code.");
         status.setAttribute("role", "status");
         panel.append(status);
+        if (annotation.refining) panel.append(aiPlaceholder("overview-refine", "Copilot is refining the change summary...", 2));
     }
     if (annotation?.body) {
         const body = revealOnce(el("div", "annotation-body brief-ai"), "overview");
@@ -3207,6 +3265,7 @@ function appendInternalReview(container, review, scope, resume) {
     container.append(progress);
     const actions = el("div", "action-row");
     if (review.status === "running") {
+        container.append(aiPlaceholder(`review:${scope}`, "Copilot is reviewing the saved change...", 2));
         const cancel = el("button", "", "Stop AI review");
         cancel.type = "button";
         cancel.addEventListener("click", async () => {
@@ -3326,7 +3385,7 @@ function renderRuleCheck() {
     appendInternalReview(details, rules, "rules", () => api("/api/rule-check", {
         method: "POST", body: JSON.stringify({ force: false }),
     }));
-    if (rules.status === "running") details.append(aiPlaceholder("rule-check", "Copilot is checking the change against the repository rules…", 3));
+    if (rules.status === "running" && !rules.coverage) details.append(aiPlaceholder("rule-check", "Copilot is checking the change against the repository rules…", 3));
     if (rules.content) {
         markdownContext.subject = null;
         markdownContext.intent = null;
@@ -3570,21 +3629,25 @@ async function selectItem(item, notify = true, annotate = true) {
 
 function ensureAnnotation(item, epoch = state.selectionEpoch) {
     if (epoch !== state.selectionEpoch || state.selected?.id !== item.id) return;
+    const generation = state.payload.review_generation;
     const cached = state.payload?.annotations?.[item.id];
     if (cached) {
+        if (state.prefetchStatus?.id === item.id) {
+            state.prefetchStatus = null;
+            renderPrefetchStatus();
+        }
         renderAnnotation(item, cached);
         return;
     }
     renderAnnotation(item, null, true);
-    api("/api/annotation", {
-        method: "POST",
-        body: JSON.stringify({ id: item.id, evidence_ids: item.evidence_ids || [] }),
-    })
-        .then(({ annotation }) => {
+    requestAnnotation(item)
+        .then((annotation) => {
             if (epoch === state.selectionEpoch && state.selected?.id === item.id) {
-                state.payload.annotations ||= {};
-                state.payload.annotations[item.id] = annotation;
                 renderAnnotation(item, annotation);
+            }
+            if (state.payload?.review_generation === generation && state.prefetchStatus?.id === item.id) {
+                state.prefetchStatus = null;
+                renderPrefetchStatus();
             }
         })
         .catch((error) => {
@@ -4683,7 +4746,9 @@ async function renderSource({ preserveScroll = false } = {}) {
     const selectedPath = state.selected?.path || state.payload?.model?.nodes?.find((node) =>
         node.id === (state.selected?.node_id || state.selected?.id))?.path;
     if (annotation && selectedPath === state.source.path) renderAnnotation(state.selected, annotation);
-    else if (!renderSectionEvidence()) elements.source_annotation.classList.add("hidden");
+    else if (selectedPath === state.source.path && state.annotationRequests.has(`${state.payload.review_generation}:${state.selected?.id}`)) {
+        renderAnnotation(state.selected, null, true);
+    } else if (!renderSectionEvidence()) elements.source_annotation.classList.add("hidden");
     renderSourceRisk();
     renderSourceCoverage();
     renderSourceDecisions();
@@ -6611,6 +6676,9 @@ function renderCustomAnalyses() {
             !prompt.trusted ? "Approval required" : result?.status || "Waiting"));
         details.append(summary, el("p", "muted", `${prompt.scope === "global" ? "All repositories" : "This repository"} · Saved snapshot · AI-generated, verify claims`));
         appendInternalReview(details, result, `custom:${key}`, () => runCustomAnalyses({ scope: prompt.scope, id: prompt.id, force: false }));
+        if (result?.status === "running" && !result.coverage) {
+            details.append(aiPlaceholder(`custom:${key}`, "Copilot is running this check...", 3));
+        }
         if (result?.content) {
             markdownContext.subject = null;
             markdownContext.intent = null;
@@ -6618,8 +6686,8 @@ function renderCustomAnalyses() {
             if (result.coverage) renderInternalReviewBody(body, result);
             else renderMarkdown(body, result.content);
             details.append(body);
-        } else if (["queued", "running"].includes(result?.status)) {
-            details.append(aiPlaceholder(`custom:${key}`, result.status === "queued" ? "Waiting for the previous check…" : "Copilot is running this check…", 3));
+        } else if (result?.status === "queued") {
+            details.append(aiPlaceholder(`custom:${key}`, "Waiting for the previous check...", 3));
         }
         if (result?.error) details.append(el("p", "error", result.error));
         const rerun = el("button", "", result ? "Run again" : "Run now");
@@ -7442,6 +7510,14 @@ function resetReviewNavigation() {
     state.sectionDataKey = null;
     state.sectionLoadingKey = null;
     state.sectionError = null;
+    state.layerSummaryRequested = null;
+    state.layerSummaryLoading = false;
+    state.layerSummaryError = null;
+    state.annotationRequests.clear();
+    state.prefetchedAnnotations = new Set();
+    state.prefetchStatus = null;
+    clearTimeout(state.prefetchTimer);
+    renderPrefetchStatus();
     state.openSectionKeys = new Set();
     state.openSectionRangeKeys = new Set();
     state.summaryKey = null;
@@ -7752,7 +7828,8 @@ function connectEvents() {
     events.addEventListener("state", (event) => {
         if (state.eventSource !== events) return;
         const update = JSON.parse(event.data);
-        const previousOverview = state.payload?.annotations?.overview?.body;
+        const previousOverview = state.payload?.annotations?.overview;
+        const previousLayers = state.payload?.annotations?.layers;
         state.eventSnapshotReceived = true;
         const payload = update.partial ? { ...state.payload, ...update } : update;
         if (payload.type === "repository-changed") {
@@ -7776,7 +7853,12 @@ function connectEvents() {
             return;
         }
         if (payload.type === "annotation") {
-            if (previousOverview !== payload.annotations?.overview?.body) renderChangeBrief();
+            const overview = payload.annotations?.overview;
+            if (["body", "basis", "refining", "refine_error"].some((key) => previousOverview?.[key] !== overview?.[key])) renderChangeBrief();
+            if (previousLayers?.generated_at !== payload.annotations?.layers?.generated_at) {
+                renderWorkspaceNavigation();
+                renderReviewOverview();
+            }
             const annotation = payload.annotations?.[state.selected?.id];
             if (annotation) renderAnnotation(state.selected, annotation);
             return;

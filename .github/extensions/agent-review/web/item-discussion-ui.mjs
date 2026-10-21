@@ -1,3 +1,5 @@
+import { aiPlaceholder } from "./ai-activity.mjs";
+
 const node = (tag, text, className = "") => {
     const element = document.createElement(tag);
     element.className = className;
@@ -141,6 +143,9 @@ export class ItemDiscussionPane {
                 article.append(node("p", "Earlier answer: supplied-context and saved-snapshot counts were not recorded. Verify any availability claims.", "muted"));
             }
             for (const citation of message.citations || []) article.append(this.sourceLink(citation));
+            if (message.role === "assistant" && message.status === "generating") {
+                article.append(aiPlaceholder(message.content ? "Copilot is continuing the answer..." : "Copilot is preparing an answer...", 3));
+            }
             if (["stopped", "error"].includes(message.status)) {
                 article.append(node("p",
                     `${message.status === "stopped" ? "Stopped" : "Could not complete"}: ${message.error || "No complete answer was produced."}`, "error"));

@@ -60,6 +60,8 @@
         </div>
         <input id="workspace-search" type="search" aria-label="Find a changed file or group" placeholder="Filter changed files…">
         <p id="workspace-count" class="muted"></p>
+        <p class="workspace-nav-hint muted">Expand a layer to see its files. Select a file to read its diff.</p>
+        <div id="workspace-prefetch" class="hidden"></div>
         <button id="workspace-group-retry" class="link-button hidden" type="button">Retry grouping</button>
         <div id="workspace-nav-list"></div>
     </aside>
@@ -112,6 +114,7 @@
                 </div>
             </div>
             <div id="overview-description"></div>
+            <div id="overview-prefetch" class="hidden"></div>
             <section class="overview-path" aria-labelledby="overview-path-title">
                 <h3 id="overview-path-title" class="overview-path-title">Reading path</h3>
                 <ol id="overview-layers" class="overview-layers"></ol>
