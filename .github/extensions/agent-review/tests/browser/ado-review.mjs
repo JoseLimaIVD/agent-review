@@ -53,7 +53,7 @@ try {
             if (suffix.endsWith("/iterations")) return { value: [{ id: 3,
                 sourceRefCommit: { commitId: head }, targetRefCommit: { commitId: base }, commonRefCommit: { commitId: base } }] };
             if (suffix === "/refs") return { value: [
-                { name: pr.sourceRefName, objectId: head }, { name: pr.targetRefName, objectId: moved ? head : base },
+                { name: pr.sourceRefName, objectId: moved ? base : head }, { name: pr.targetRefName, objectId: base },
             ] };
             return pr;
         };

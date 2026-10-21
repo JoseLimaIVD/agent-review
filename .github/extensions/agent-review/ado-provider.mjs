@@ -170,8 +170,8 @@ export async function readAdoSnapshot(input, client = createAdoClient()) {
     const iterations = listValue(await client(repo, `/pullRequests/${repo.number}/iterations`));
     const latest = iterations.reduce((best, item) => Number.isSafeInteger(item.id) && item.id > (best?.id || 0) ? item : best, null);
     const head = latest?.sourceRefCommit?.commitId;
-    const target = pr.lastMergeTargetCommit?.commitId || latest?.targetRefCommit?.commitId;
-    if (!shaPattern.test(head || "") || !shaPattern.test(target || "") || !shaPattern.test(latest?.commonRefCommit?.commitId || "")
+    let target = pr.lastMergeTargetCommit?.commitId || latest?.targetRefCommit?.commitId;
+    if (!shaPattern.test(head || "") || (pr.status !== "active" && !shaPattern.test(target || "")) || !shaPattern.test(latest?.commonRefCommit?.commitId || "")
         || ![pr.sourceRefName, pr.targetRefName].every((ref) => typeof ref === "string" && ref.startsWith("refs/heads/") && !/[\s\u0000-\u001f]/.test(ref))) {
         throw new Error("Azure DevOps has not supplied a complete PR snapshot. Wait for the PR update to finish and retry.");
     }
@@ -184,11 +184,14 @@ export async function readAdoSnapshot(input, client = createAdoClient()) {
         });
     }
     if (pr.status === "active") {
-        for (const [repository, ref, expected] of [[sourceRepo, pr.sourceRefName, head], [repo, pr.targetRefName, target]]) {
+        // Target branches can advance without a source iteration or a refreshed merge evaluation.
+        for (const [repository, ref, expected] of [[sourceRepo, pr.sourceRefName, head], [repo, pr.targetRefName, null]]) {
             const refs = listValue(await client(repository, "/refs", { query: { filter: ref.slice(5) } }));
-            if (refs.find((item) => item.name === ref)?.objectId !== expected) {
+            const current = refs.find((item) => item.name === ref)?.objectId;
+            if (!shaPattern.test(current || "") || (expected && current !== expected)) {
                 throw new Error("The PR branches changed or its iteration is still updating. Refresh the PR list and open the review again.");
             }
+            if (!expected) target = current;
         }
     }
     return { pr, repo, sourceRepo, head, target, iteration: latest.id,

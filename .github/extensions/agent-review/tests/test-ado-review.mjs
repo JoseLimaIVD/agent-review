@@ -18,7 +18,7 @@ const input = parseAdoUrl(url);
 const repository = { id: repoId, name: "sample", project: { id: projectId, name: "Project One" } };
 const source = "a".repeat(40), target = "b".repeat(40), common = "c".repeat(40);
 
-function fakeAdo({ head = source, base = target, ancestor = common, status = "active", change = () => {} } = {}) {
+function fakeAdo({ head = source, base = target, liveHead = head, liveTarget = base, ancestor = common, status = "active", change = () => {} } = {}) {
     const calls = [];
     const pr = { pullRequestId: 42, repository, status, supportsIterations: true,
         title: "Strict fallback", description: "Full PR description", createdBy: { displayName: "Author" },
@@ -31,7 +31,7 @@ function fakeAdo({ head = source, base = target, ancestor = common, status = "ac
         if (suffix === "") result = repository;
         else if (suffix.endsWith("/iterations")) result = { value: [iteration] };
         else if (suffix === "/refs") result = { value: [
-            { name: pr.sourceRefName, objectId: head }, { name: pr.targetRefName, objectId: base },
+            { name: pr.sourceRefName, objectId: liveHead }, { name: pr.targetRefName, objectId: liveTarget },
         ] };
         else if (suffix === "/pullRequests") result = { value: Array.from({ length: 31 }, (_, index) => ({
             ...pr, pullRequestId: 42 + index, creationDate: "2026-10-10T01:00:00Z", isDraft: true,
@@ -158,7 +158,7 @@ test("ADO rejects incomplete snapshots and local ambiguous ancestry without fall
 
 test("closed ADO PRs retain their pinned snapshot even after branches move or are deleted", async () => {
     for (const status of ["completed", "abandoned"]) {
-        const { client, calls } = fakeAdo({ status, change: (result, suffix) => suffix === "/pullRequests"
+        const { client, calls } = fakeAdo({ status, liveHead: null, liveTarget: "d".repeat(40), change: (result, suffix) => suffix === "/pullRequests"
             ? { value: [{ ...result.value[0], closedDate: "2026-10-11T01:00:00Z" }] } : result });
         const snapshot = await readAdoSnapshot(input, client);
         assert.equal(snapshot.head, source);
@@ -190,6 +190,40 @@ test("ADO fork metadata resolves a distinct source repository before fetching", 
     }, { adoClient: client });
     assert.equal(resolved.sourceRepository.repositoryId, forkId);
     assert.ok(calls.some((args) => args.includes("https://dev.azure.com/example/Fork%20Project/_git/fork")));
+});
+
+test("active ADO reviews pin the live target even when merge evaluation lags its branch", async () => {
+    const advanced = "d".repeat(40);
+    const fake = fakeAdo({ liveTarget: advanced });
+    const original = await readAdoSnapshot(input, fakeAdo().client);
+    const snapshot = await readAdoSnapshot(input, fake.client);
+    assert.equal(snapshot.head, source);
+    assert.equal(snapshot.target, advanced);
+    assert.equal(snapshot.iteration, original.iteration);
+    assert.notEqual(snapshot.fingerprint, original.fingerprint);
+    const calls = [];
+    const resolved = await resolveReviewTarget("C:\\repo", { mode: "pr", ref: url }, async (_, args) => {
+        calls.push(args);
+        return { stdout: args.includes("merge-base") ? common : "" };
+    }, { adoClient: fake.client });
+    assert.equal(resolved.targetRef, advanced);
+    assert.equal(resolved.baseRef, common);
+    assert.ok(calls.some((args) => args.includes("fetch") && args.at(-1) === advanced));
+    assert.ok(!calls.some((args) => args.includes("fetch") && args.at(-1) === target));
+    assert.ok(calls.some((args) => args.includes("merge-base") && args.includes(advanced) && args.includes(source)));
+});
+
+test("active ADO reviews still reject source iteration drift and unavailable target refs", async () => {
+    await assert.rejects(readAdoSnapshot(input, fakeAdo({ liveHead: common }).client), /branches changed/);
+    for (const liveTarget of ["", "not-a-commit", null]) {
+        await assert.rejects(readAdoSnapshot(input, fakeAdo({ liveTarget }).client), /branches changed/);
+    }
+    const missingTarget = fakeAdo({ change: (result, suffix) => suffix === "/refs"
+        ? { value: result.value.filter((ref) => ref.name !== "refs/heads/main") } : result });
+    await assert.rejects(readAdoSnapshot(input, missingTarget.client), /branches changed/);
+    const deletedSource = fakeAdo({ change: (result, suffix) => suffix === "/refs"
+        ? { value: result.value.filter((ref) => ref.name !== "refs/heads/feature") } : result });
+    await assert.rejects(readAdoSnapshot(input, deletedSource.client), /branches changed/);
 });
 
 async function gitRepository(t) {

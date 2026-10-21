@@ -778,11 +778,14 @@ ADO includes active, completed, abandoned, and draft PRs; dates are labeled
 
 To review an ADO PR, open its existing local clone with **Change repository**,
 then choose **Pull request**, the repository remote if needed, and a PR.
-ADO reviews compare the latest source iteration with a validated target
-snapshot's merge base, not the synthetic merge result. Fork source objects are
-fetched from their own repository. Missing objects, incomplete iterations,
-ambiguous merge bases, and moving branches produce explicit errors rather than
-substituting worktree content. Files, index, and the checked-out branch stay
+Active ADO reviews pin the live target branch commit and compare the latest
+source iteration against its merge base, not the synthetic merge result. Target
+advancement does not require a new source iteration or a refreshed merge
+evaluation. Completed and abandoned PRs retain their evaluated target snapshot.
+Fork source objects are fetched from their own repository. Missing objects,
+incomplete iterations, ambiguous merge bases, and source branches that no longer
+match their iteration produce explicit errors rather than substituting worktree
+content. Files, index, and the checked-out branch stay
 unchanged. This flow does not clone repositories or switch the Copilot workspace.
 
 Use **Finish → Preview / export handoff** to export the reviewed ADO snapshot
