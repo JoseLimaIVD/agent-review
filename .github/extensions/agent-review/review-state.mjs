@@ -145,8 +145,8 @@ export function runAnalyzerProcess(executable, args, onProgress = () => {}, opti
         });
         child.stdout.on("data", (chunk) => {
             outputBytes += chunk.length;
-            if (outputBytes > 128 * 1024 * 1024) {
-                failure = new Error("Analyzer output exceeded 128 MB.");
+            if (outputBytes > 256 * 1024 * 1024) {
+                failure = new Error("Analyzer output exceeded 256 MB.");
                 child.stop();
                 return;
             }

@@ -642,6 +642,8 @@ separate **128 Mi-character JSON request limit** accommodates both snapshots and
 JSON escaping/metadata overhead; it does not increase the analysis budgets.
 Oversized or invalid requests fail with an error rather than silently dropping
 files. File, project-context, symbol and edge caps report incomplete analysis.
+The extension bounds the complete analyzer response at **256 MiB**; larger
+responses fail explicitly rather than truncating the saved review.
 
 Scanning reads **both saved trees** and never invokes reviewed MSBuild targets,
 restores packages, builds projects, or executes reviewed code. Project XML is
