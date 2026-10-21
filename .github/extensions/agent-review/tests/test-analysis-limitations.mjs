@@ -16,17 +16,19 @@ test("library calls that cannot be linked are summarized apart from real limitat
         "[Base/current] web/a.test.jsx:9: unresolved call it; target is unknown.",
         "[Current] src/app.ts:3: unresolved module react; target is unknown.",
         "[Base/current] src/app.ts:7: unresolved call (items || [])\n    .map; target is unknown.",
+        "[Base/current] src/app.ts:8: unresolved call (other || [])\n    .map; target is unknown.",
         "Rust coverage ignored: add rust-coverage.json with revision, report, and source_hashes evidence.",
     ];
     const notes = summarizeAnalysisWarnings(warnings);
-    assert.deepEqual([notes.calls, notes.imports, notes.unlinked, notes.other.length], [7, 1, 8, 1]);
+    assert.deepEqual([notes.calls, notes.imports, notes.unlinked, notes.other.length], [8, 1, 9, 1]);
     assert.deepEqual(notes.top.slice(0, 2), ["expect", "it"]);
-    assert.equal(notes.byPath.get("src/app.ts"), 2);
+    assert.ok(!notes.top.includes(""), "a call written as a parenthesized expression never shows a blank name");
+    assert.equal(notes.byPath.get("src/app.ts"), 3);
     assert.equal(notes.ordered[0], warnings.at(-1), "real limitations are listed first");
-    assert.match(unlinkedSentence(notes), /could not link 7 calls and 1 import to saved source \(most often expect, it/);
+    assert.match(unlinkedSentence(notes), /could not link 8 calls and 1 import to saved source \(most often expect, it/);
     assert.equal(summarizeAnalysisWarnings(warnings), notes, "summaries are cached per warning list");
     const gaps = reviewContext({ nodes: [], edges: [], warnings }, { path: "src/app.ts" }).gaps.join(" ");
-    assert.match(gaps, /could not link 2 calls or imports in this file/);
+    assert.match(gaps, /could not link 3 calls or imports in this file/);
     assert.match(gaps, /1 saved analyzer limitation in the change overview/);
     assert.doesNotMatch(gaps, /9 saved analyzer/);
 });

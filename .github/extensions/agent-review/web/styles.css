@@ -1727,7 +1727,7 @@ h3 { font-size: 14px; font-weight: 600; }
 .review-overview-actions button { min-height: 32px; padding: 5px 12px; border: 1px solid var(--cp-border); border-radius: 6px; background: var(--cp-surface-soft); color: var(--cp-text); cursor: pointer; }
 #overview-start { background: var(--cp-primary); border-color: var(--cp-primary); color: #fff; font-weight: 600; }
 .review-overview-actions button:disabled { opacity: .5; cursor: default; }
-#overview-description { max-width: 90ch; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+#overview-description { font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
 .overview-copy-label { margin: 6px 0 4px; font-size: 12px; }
 .overview-progress { margin: 12px 0 4px; font-weight: 600; font-size: 13px; }
 #overview-scope { margin: 0; font-size: 12px; }

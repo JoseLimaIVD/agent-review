@@ -19,8 +19,8 @@ export function summarizeAnalysisWarnings(warnings = []) {
         if (!match) { other.push(warning); continue; }
         unlinked.push(warning);
         counts[match[2]]++;
-        const subject = match[3].split(/[\s(]/)[0].slice(0, 40);
-        subjects.set(subject, (subjects.get(subject) || 0) + 1);
+        const subject = match[3].trim().replace(/^[([{]+/, "").split(/[\s()]/)[0].slice(0, 40);
+        if (subject) subjects.set(subject, (subjects.get(subject) || 0) + 1);
         if (match[1]) byPath.set(match[1], (byPath.get(match[1]) || 0) + 1);
     }
     const summary = { calls: counts.call, imports: counts.module, inheritance: counts.heritage, unlinked: unlinked.length,
