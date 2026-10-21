@@ -1094,6 +1094,10 @@ main { padding: 16px 20px 32px; }
   font-weight: 600;
 }
 .review-plan-layer { margin: 12px 0 0; font-size: .8125rem; font-weight: 600; color: var(--cp-text-muted); }
+/* Supporting files are unordered: a folder glyph in the number slot, without the step circle. */
+.layer-chip.is-unnumbered, .overview-layer-number.is-unnumbered, .workspace-layer-number.is-unnumbered { border-color: transparent; color: var(--cp-text-muted); }
+.is-unnumbered > svg { width: 14px; height: 14px; fill: currentColor; }
+.workspace-file-meta .layer-chip.is-unnumbered > svg { width: 12px; height: 12px; }
 .review-plan-layer:first-of-type { margin-top: 4px; }
 .layer-chip-inline { display: inline-grid; width: 20px; height: 20px; margin-right: 8px; font-size: .6875rem; vertical-align: middle; }
 .review-plan-copy { min-width: 0; display: grid; gap: 5px; }
@@ -2256,6 +2260,9 @@ body.reviewing .workspace.impact-mode .impact-graph svg { min-height: 0; }
 body.reviewing:not(.workspace-exploring) .graph-panel > .panel-heading { display: none; }
 body.reading-source .workspace { visibility: hidden; }
 body.reviewing #source-panel { top: var(--workspace-top, var(--workflow-height)); left: var(--workspace-navigation-width); z-index: 100; }
+/* The originating-session transcript occupies the reading area beside the rail, so it is centered in what is visible. */
+body.reviewing #session-history-panel { top: var(--workspace-top, var(--workflow-height)); left: var(--workspace-navigation-width); z-index: 110; border-left: 1px solid var(--cp-border); }
+body.reviewing.review-source-focus #session-history-panel { left: 0; border-left: 0; }
 .file-review-footer { flex: 0 0 auto; display: grid; grid-template-columns: auto minmax(100px, 1fr) auto auto minmax(0, auto); gap: 6px; align-items: center; padding: 6px 12px; border-top: 1px solid var(--cp-border); background: var(--cp-surface); }
 .file-review-footer label { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; }
 #file-review-label { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--cp-text-muted); }
@@ -2322,6 +2329,7 @@ body.reviewing.review-source-focus .source-body { grid-template-columns: minmax(
   body.reviewing .workspace { left: 0; grid-template-columns: minmax(0, 1fr) !important; }
   body.reviewing .workspace .detail { display: none; }
   body.reviewing #source-panel { left: 0; }
+  body.reviewing #session-history-panel { left: 0; border-left: 0; }
   .workspace-reading-tools { flex-wrap: wrap; }
   .workspace-reading-tools button { display: inline-block; }
   #workspace-group-label { flex-basis: 100%; }

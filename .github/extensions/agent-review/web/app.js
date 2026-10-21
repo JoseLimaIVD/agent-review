@@ -382,7 +382,7 @@ function renderWorkspaceNavigation() {
                     const meta = el("span", "workspace-file-meta");
                     meta.append(el("span", "workspace-file-delta", `+${file.lines_added || 0} −${file.lines_removed || 0}`));
                     if (layer) {
-                        const chip = el("span", "layer-chip layer-chip-inline", layer.number ? String(layer.number) : "·");
+                        const chip = layerMarker(layer, "layer-chip layer-chip-inline");
                         chip.title = layerLabel(layer);
                         meta.append(chip);
                     }
@@ -418,7 +418,7 @@ function renderWorkspaceNavigation() {
                 section.open = true;
                 openLayer(navigation, layer);
             });
-            name.append(el("span", "workspace-layer-number", layer.number ? String(layer.number) : "·"), openTitle);
+            name.append(layerMarker(layer, "workspace-layer-number"), openTitle);
             const meta = el("span", "workspace-layer-meta");
             if (title !== layer.name) meta.append(el("span", "", layer.name));
             if (layer.path && layer.path !== "/" && !layer.supporting) meta.append(el("code", "", layer.path));
@@ -1230,7 +1230,7 @@ function renderCards(container, items, emptyText) {
             const layer = layerOf(layeredNavigation(), { path: concernPath(item) });
             if (layer) {
                 wrapper.dataset.layer = layer.id;
-                const chip = el("span", "layer-chip layer-chip-inline", layer.number ? String(layer.number) : "·");
+                const chip = layerMarker(layer, "layer-chip layer-chip-inline");
                 chip.title = layerLabel(layer);
                 heading.prepend(chip);
             }
@@ -1836,7 +1836,7 @@ function renderFinishReview() {
             const progressCell = el("span", "overview-layer-progress", `${progress.reviewed}/${progress.total} reviewed`);
             const tests = layerTestChip(layer);
             if (tests) progressCell.append(tests);
-            row.append(el("span", "overview-layer-number", layer.number ? String(layer.number) : "·"), name, progressCell);
+            row.append(layerMarker(layer, "overview-layer-number"), name, progressCell);
             row.addEventListener("click", () => openLayer(navigation, layer));
             const item = el("li", "");
             item.append(row);
@@ -2399,7 +2399,7 @@ function renderSections(model) {
         });
         const summary = el("summary", "");
         if (layer) {
-            const chip = el("span", "layer-chip layer-chip-inline", layer.number ? String(layer.number) : "·");
+            const chip = layerMarker(layer, "layer-chip layer-chip-inline");
             chip.title = layerLabel(layer);
             summary.append(chip);
         }
@@ -2764,6 +2764,23 @@ function layerOf(navigation, entry) {
 const layerTitle = (layer) => layer ? state.payload?.annotations?.layers?.titles?.[layer.id] || layer.name : "";
 const layerLabel = (layer) => layer ? `${layer.number ? `${layer.number}. ` : ""}${layerTitle(layer)}` : "";
 
+// Numbered layers show their step number in a circle. Supporting files are outside the reading order, so they show a
+// folder (GitHub's file-directory octicon) instead of an empty-looking circle.
+function layerMarker(layer, className) {
+    if (layer?.number) return el("span", className, String(layer.number));
+    const marker = el("span", `${className} is-unnumbered`);
+    marker.title = "Supporting files: outside the numbered reading order";
+    marker.setAttribute("aria-label", "Supporting files");
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 16 16");
+    svg.setAttribute("aria-hidden", "true");
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", "M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2C6.07 1.26 5.55 1 5 1H1.75ZM1.5 2.75a.25.25 0 0 1 .25-.25H5a.25.25 0 0 1 .2.1l.9 1.2c.33.44.85.7 1.4.7h6.75a.25.25 0 0 1 .25.25v8.5a.25.25 0 0 1-.25.25H1.75a.25.25 0 0 1-.25-.25V2.75Z");
+    svg.append(path);
+    marker.append(svg);
+    return marker;
+}
+
 function dependencyLabel(navigation, dependency) {
     const layer = navigation?.layers.find((item) => item.number === dependency.number);
     return layer ? layerLabel(layer) : `${dependency.number}. ${dependency.name}`;
@@ -2822,7 +2839,7 @@ function renderOverviewLayers(navigation) {
         const row = el("button", `overview-layer${layer.supporting ? " is-supporting" : ""}`);
         row.type = "button";
         const name = layerHeading(layer);
-        row.append(el("span", "overview-layer-number", layer.number ? String(layer.number) : "·"), name,
+        row.append(layerMarker(layer, "overview-layer-number"), name,
             el("span", "overview-layer-progress", `${progress.reviewed}/${progress.total} reviewed`));
         const intent = state.payload.annotations?.layers?.intents?.[layer.id];
         const details = [];
@@ -2996,7 +3013,7 @@ function alignFocusPoints(body) {
         items.sort((a, b) => (a.layer ? index.get(a.layer.id) : Infinity) - (b.layer ? index.get(b.layer.id) : Infinity) || a.position - b.position);
         for (const { item, layer } of items) {
             if (layer) {
-                const chip = el("span", "layer-chip layer-chip-inline", layer.number ? String(layer.number) : "·");
+                const chip = layerMarker(layer, "layer-chip layer-chip-inline");
                 chip.title = layerLabel(layer);
                 chip.setAttribute("aria-label", `Layer ${layerLabel(layer)}`);
                 item.prepend(chip);
@@ -5422,7 +5439,7 @@ function renderReviewPlan(model, findings) {
             if (item.evidence.inferred) proof.append(el("span", "proof-inferred", `${item.evidence.inferred} inferred`));
             if (item.evidence.confirmed) proof.append(el("span", "proof-confirmed", `${item.evidence.confirmed} confirmed`));
             if (proof.childElementCount) copy.append(proof);
-            const chip = el("span", "layer-chip", layer ? layer.number ? String(layer.number) : "·" : "–");
+            const chip = layer ? layerMarker(layer, "layer-chip") : el("span", "layer-chip", "–");
             chip.title = layer ? layerLabel(layer) : "Outside the reading path";
             row.append(chip, copy, el("span", "review-plan-open", "Open →"));
             row.addEventListener("click", () => openReviewPlanItem(item));
