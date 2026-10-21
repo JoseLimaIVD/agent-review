@@ -94,6 +94,7 @@ try {
         assert.match(code, /return 2/);
         assert.doesNotMatch(code, /dirty_only|999/);
         await page.click("#source-close");
+        await page.locator("#workflow-overview").click();
         const worktreeResponse = page.waitForResponse((res) => res.url().endsWith("/api/review-target"));
         await page.selectOption("#review-mode", "worktree");
         assert.equal((await worktreeResponse).status(), 200);

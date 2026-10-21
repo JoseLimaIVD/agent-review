@@ -58,7 +58,7 @@ const state = {
 };
 const elements = Object.fromEntries([
     "source-coverage", "source-position", "diff-layout", "source-strip", "source-strip-toggle", "source-strip-body", "overview-layers", "overview-stats", "overview-limitation",
-    "review-target-form", "review-mode", "review-ref", "review-target-label", "repository-identity", "review-list-refresh", "review-more", "review-options-status", "review-picker-notice", "clean-review", "change-brief",
+    "review-target-form", "review-mode", "review-remote", "review-ref", "review-target-label", "repository-identity", "review-list-refresh", "review-more", "review-options-status", "review-picker-notice", "clean-review", "change-brief",
     "review-overview", "review-background", "overview-title", "overview-description", "overview-progress", "overview-scope", "overview-start", "overview-files",
     "review-workflow", "workflow-overview", "workflow-review", "workflow-finish", "review-finish", "workspace-target", "workspace-freshness", "workspace-find", "workspace-nav-toggle",
     "workspace-return-source", "review-navigation", "workspace-groups", "workspace-files", "workspace-search", "workspace-count",
@@ -70,7 +70,7 @@ const elements = Object.fromEntries([
     "group-review-dialog", "group-review-title", "group-review-scope", "group-review-error", "group-review-confirm", "group-review-cancel",
     "review-handoff", "handoff-close", "handoff-status", "handoff-error", "handoff-refresh", "handoff-markdown",
     "handoff-markdown-save", "handoff-state-save", "handoff-state-preview", "handoff-import-file", "handoff-import-preview",
-    "handoff-import-confirm", "handoff-import-error", "handoff-provider", "handoff-provider-status", "handoff-provider-error", "handoff-confirm", "handoff-submit",
+    "handoff-import-confirm", "handoff-import-error", "handoff-provider", "handoff-provider-status", "handoff-provider-error", "handoff-confirm", "handoff-confirm-label", "handoff-submit",
     "status", "refresh", "cancel-analysis", "analysis-cancelled", "source-context-notice", "connection-notice", "reconnect", "worktree-notice", "worktree-notice-text", "worktree-overview", "error", "analysis-progress", "progress-phase", "progress-message", "progress-percent",
     "progress-bar", "summary", "breadcrumbs", "attention", "attention-count", "packages", "rail-resize", "impact-view", "source-impact",
     "show-evidence", "show-discussion", "item-discussion", "sections-view", "source-section",
@@ -80,7 +80,8 @@ const elements = Object.fromEntries([
     "session-history-panel", "session-history-title", "session-history-meta", "session-history-close", "session-transcript",
     "custom-analyses", "custom-results", "custom-manage", "prompt-manager", "prompt-manager-close",
     "change-repository", "repository-picker", "repository-picker-close", "repository-picker-error",
-    "repository-picker-form", "repository-path", "repository-open",
+    "repository-picker-form", "repository-path", "repository-open", "repository-source", "repository-local-fields",
+    "repository-ado-fields", "repository-pr-url", "repository-destination", "repository-picker-status",
     "prompt-manager-error", "prompt-library", "prompt-editor", "prompt-editor-title", "prompt-scope",
     "prompt-title", "prompt-text", "prompt-enabled", "prompt-save", "prompt-new",
 ].map((id) => [id.replaceAll("-", "_"), document.getElementById(id)]));
@@ -1763,12 +1764,18 @@ async function openReviewHandoff() {
         elements.handoff_markdown_save.disabled = false;
         elements.handoff_state_save.disabled = false;
         elements.handoff_provider.replaceChildren();
+        const ado = preview.provider.name === "Azure DevOps";
+        elements.handoff_submit.textContent = ado ? "Post PR summary comment" : "Submit comment-only PR review";
+        elements.handoff_confirm_label.textContent = ado
+            ? "I reviewed this exact Markdown and choose to post it as an Azure DevOps PR summary comment. No reviewer vote or PR status will change."
+            : "I reviewed this exact Markdown and choose to send this summary as a comment-only PR review. This is not approval or a request for changes.";
         if (preview.provider.url) {
             const link = el("a", "", preview.provider.url);
             link.href = preview.provider.url;
             link.target = "_blank";
             link.rel = "noopener noreferrer";
-            elements.handoff_provider.append("Destination: ", link, ` · Commit ${preview.provider.commit}. Uses the gh CLI's existing authorization.`);
+            elements.handoff_provider.append("Destination: ", link, ` · Commit ${preview.provider.commit}. Uses ${preview.provider.authorization || "gh CLI authorization"}.`);
+            if (preview.provider.limitation) elements.handoff_provider.append(" ", preview.provider.limitation);
         }
         elements.handoff_provider_status.textContent = preview.provider.available
             ? "No review has been sent from this preview." : preview.provider.reason;
@@ -1868,7 +1875,18 @@ elements.handoff_submit.addEventListener("click", async () => {
     try {
         const receipt = await api("/api/review-handoff/submit", { method: "POST",
             body: JSON.stringify({ token: state.handoff?.token, confirm: elements.handoff_confirm.checked }) });
-        if (epoch === state.handoffEpoch) handoffProviderStatus(`Submitted comment-only review ${receipt.id} on commit ${receipt.commit}. No approval or change request was submitted.`);
+        if (epoch === state.handoffEpoch) {
+            handoffProviderStatus(receipt.provider === "ado"
+                ? `Posted Azure DevOps summary comment ${receipt.id} for reviewed commit ${receipt.commit}. No reviewer vote or PR status changed.`
+                : `Submitted comment-only review ${receipt.id} on commit ${receipt.commit}. No approval or change request was submitted.`);
+            if (receipt.url) {
+                const link = el("a", "", " View posted comment");
+                link.href = receipt.url;
+                link.target = "_blank";
+                link.rel = "noopener noreferrer";
+                elements.handoff_provider_status.append(" ", link);
+            }
+        }
     } catch (error) {
         if (epoch === state.handoffEpoch) {
             handoffProviderStatus("No submission receipt. Read the error and check the PR before preparing another submission.");
@@ -5926,7 +5944,8 @@ function renderView() {
     elements.refresh.classList.toggle("needs-attention", Boolean(worktreeNotice));
     elements.repository_identity.textContent = model?.metadata?.repo_root
         ? `${model.metadata.repo_root} · ${state.reviewPickerPending ? "Choose a comparison" : `Base ${model.metadata.base_sha?.slice(0, 8) || "empty tree"}`}` : payload?.repo_root || "";
-    elements.change_repository.disabled = Boolean(payload?.loading || state.repositorySubmitting || state.connectionLost);
+    elements.change_repository.disabled = Boolean(payload?.loading || payload?.repository_open || state.repositorySubmitting || state.connectionLost);
+    if (payload?.repository_open) elements.repository_picker_status.textContent = payload.repository_open.message;
     const progress = payload?.progress;
     elements.status.textContent = payload?.loading ? `Analyzing ${progress?.percent || 0}%`
         : payload?.cancelled ? "Analysis cancelled" : model ? payload.restored_from_cache ? "Saved review" : "Analysis current"
@@ -6452,8 +6471,9 @@ document.querySelectorAll(".tab").forEach((tab) => tab.addEventListener("click",
 }));
 
 function updateReviewApply() {
-    const busy = Boolean(state.connectionLost || state.reviewSubmitting || state.payload?.loading);
+    const busy = Boolean(state.connectionLost || state.reviewSubmitting || state.payload?.loading || state.payload?.repository_open || state.repositorySubmitting);
     elements.review_mode.disabled = busy;
+    elements.review_remote.disabled = elements.review_mode.disabled || Boolean(state.reviewOptionsLoading);
     elements.review_ref.disabled = busy || Boolean(state.reviewOptionsLoading)
         || elements.review_mode.value === "worktree" || ![...elements.review_ref.options].some((option) => option.value);
     elements.review_list_refresh.disabled = busy || Boolean(state.reviewOptionsLoading);
@@ -6553,6 +6573,8 @@ async function loadReviewOptions({ append = false, selectedRef = null, refresh =
     const epoch = (state.reviewOptionsEpoch || 0) + 1;
     state.reviewOptionsEpoch = epoch;
     const mode = elements.review_mode.value;
+    const remote = mode === "pr" ? elements.review_remote.value : "";
+    elements.review_remote.classList.toggle("hidden", mode !== "pr" || elements.review_remote.options.length < 2);
     const selected = selectedRef ?? (elements.review_ref.value || null);
     elements.review_ref.classList.remove("hidden");
     elements.review_ref.required = mode !== "worktree";
@@ -6584,16 +6606,33 @@ async function loadReviewOptions({ append = false, selectedRef = null, refresh =
         const result = refresh
             ? await api("/api/review-targets/refresh", {
                 method: "POST",
-                body: JSON.stringify({ mode }),
+                body: JSON.stringify({ mode, ...(remote ? { remote } : {}) }),
             })
-            : await api(`/api/review-targets?mode=${mode}&page=${page}`);
+            : await api(`/api/review-targets?mode=${mode}&page=${page}${remote ? `&remote=${encodeURIComponent(remote)}` : ""}`);
         if (epoch !== state.reviewOptionsEpoch) return;
+        if (mode === "pr" && result.remotes) {
+            elements.review_remote.replaceChildren();
+            if (result.requires_remote) {
+                const placeholder = el("option", "", "Choose a PR remote...");
+                placeholder.value = "";
+                placeholder.disabled = true;
+                placeholder.selected = true;
+                elements.review_remote.append(placeholder);
+            }
+            for (const item of result.remotes) {
+                const option = el("option", "", `${item.name} · ${item.label}`);
+                option.value = item.name;
+                elements.review_remote.append(option);
+            }
+            if (result.selected_remote) elements.review_remote.value = result.selected_remote;
+            elements.review_remote.classList.toggle("hidden", result.remotes.length < 2);
+        }
         const existing = new Set([...elements.review_ref.options].map((option) => option.value));
         for (const item of result.items) {
             if (existing.has(item.ref)) continue;
             const date = item.date ? new Date(item.date).toLocaleDateString() : "";
-            const prefix = mode === "commit" ? item.short_sha : `#${item.number} · ${item.status}`;
-            const option = el("option", "", `${prefix} — ${item.title} · ${item.author || "Unknown author"} · ${date}`);
+            const prefix = mode === "commit" ? item.short_sha : `#${item.number} · ${item.status}${item.draft ? " · draft" : ""}`;
+            const option = el("option", "", `${prefix} — ${item.title} · ${item.author || "Unknown author"} · ${item.date_kind ? `${item.date_kind} ` : ""}${date}`);
             option.value = item.ref;
             elements.review_ref.append(option);
         }
@@ -6612,7 +6651,7 @@ async function loadReviewOptions({ append = false, selectedRef = null, refresh =
         elements.review_ref.disabled = !hasOptions;
         elements.review_more.textContent = "Load more";
         elements.review_more.classList.toggle("hidden", !result.has_more);
-        elements.review_options_status.textContent = hasOptions
+        elements.review_options_status.textContent = result.requires_remote ? "Choose the repository remote whose pull requests you want to review." : hasOptions
             ? refresh ? `${mode === "commit" ? "Commit" : "Pull request"} list refreshed.`
                 : mode === "pr" ? result.repository || "" : ""
             : mode === "commit" ? "No commits found." : "No pull requests found for this repository.";
@@ -6637,6 +6676,12 @@ elements.review_mode.addEventListener("change", async () => {
     state.reviewOpenError = null;
     resetReviewNavigation();
     render();
+    await loadReviewOptions({ selectedRef: "" });
+});
+elements.review_remote.addEventListener("change", async () => {
+    state.reviewPickerPending = true;
+    state.reviewOpenError = null;
+    resetReviewNavigation();
     await loadReviewOptions({ selectedRef: "" });
 });
 elements.review_ref.addEventListener("change", async () => {
@@ -6668,7 +6713,8 @@ async function openSelectedReview() {
     try {
         await api("/api/review-target", {
             method: "POST",
-            body: JSON.stringify({ mode: elements.review_mode.value, ref: elements.review_ref.value }),
+            body: JSON.stringify({ mode: elements.review_mode.value, ref: elements.review_ref.value,
+                ...(elements.review_mode.value === "pr" && elements.review_remote.value ? { remote: elements.review_remote.value } : {}) }),
         });
         state.reviewPickerPending = false;
         resetReviewNavigation();
@@ -6696,33 +6742,63 @@ async function openSelectedReview() {
 elements.change_repository.addEventListener("click", () => {
     elements.repository_path.value = state.payload?.repo_root || state.payload?.model?.metadata?.repo_root || "";
     elements.repository_picker_error.classList.add("hidden");
+    elements.repository_picker_status.textContent = "";
+    elements.repository_source.value = "local";
+    updateRepositorySource();
     elements.repository_picker.showModal();
     elements.repository_path.focus();
     elements.repository_path.select();
+});
+function updateRepositorySource() {
+    const ado = elements.repository_source.value === "ado";
+    elements.repository_local_fields.classList.toggle("hidden", ado);
+    elements.repository_ado_fields.classList.toggle("hidden", !ado);
+    elements.repository_path.disabled = ado;
+    elements.repository_pr_url.disabled = !ado;
+    elements.repository_destination.disabled = !ado;
+    elements.repository_open.textContent = ado ? "Clone and review PR" : "Open repository";
+}
+elements.repository_source.addEventListener("change", () => {
+    updateRepositorySource();
+    elements.repository_picker_error.classList.add("hidden");
+    elements.repository_picker_status.textContent = "";
+    (elements.repository_source.value === "ado" ? elements.repository_pr_url : elements.repository_path).focus();
 });
 elements.repository_picker_close.addEventListener("click", () => elements.repository_picker.close());
 elements.repository_picker_form.addEventListener("submit", async (event) => {
     event.preventDefault();
     state.repositorySubmitting = true;
+    const ado = elements.repository_source.value === "ado";
+    const input = ado ? { prUrl: elements.repository_pr_url.value, destination: elements.repository_destination.value }
+        : { repoPath: elements.repository_path.value };
     elements.repository_open.disabled = true;
+    for (const control of [elements.repository_source, elements.repository_path, elements.repository_pr_url, elements.repository_destination]) control.disabled = true;
     elements.repository_picker_error.classList.add("hidden");
+    elements.repository_picker_status.textContent = ado ? "Validating the PR and new clone destination..." : "Opening repository...";
+    updateReviewApply();
     try {
-        await api("/api/repository", { method: "POST", body: JSON.stringify({ repoPath: elements.repository_path.value }) });
+        await api("/api/repository", { method: "POST", body: JSON.stringify(input) });
         state.payload = await api("/api/state");
         resetReviewNavigation();
         state.reviewTargetKey = null;
-        state.reviewPickerPending = true;
+        state.reviewPickerPending = !state.payload.model || state.payload.review_target?.mode === "none";
+        state.reviewOptionsEpoch = (state.reviewOptionsEpoch || 0) + 1;
+        elements.review_remote.replaceChildren();
+        elements.review_remote.classList.add("hidden");
         state.customPrompts = [];
         state.customLibraryError = null;
         elements.repository_picker.close();
         loadCustomPrompts();
         render();
     } catch (error) {
+        elements.repository_picker_status.textContent = "Repository open failed. Read the error before retrying; no automatic retry was made.";
         elements.repository_picker_error.textContent = error.message;
         elements.repository_picker_error.classList.remove("hidden");
     } finally {
         state.repositorySubmitting = false;
         elements.repository_open.disabled = false;
+        elements.repository_source.disabled = false;
+        updateRepositorySource();
         render();
     }
 });

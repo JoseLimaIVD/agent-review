@@ -22,6 +22,7 @@
                     <option value="commit">Commit</option>
                     <option value="pr">Pull request</option>
                 </select>
+                <select id="review-remote" class="hidden" aria-label="Pull request repository remote"></select>
                 <select id="review-ref" class="hidden" aria-label="Commit or pull request" disabled></select>
                 <button id="review-list-refresh" class="hidden" type="button" title="Fetch remote commits or reload pull requests added since this list was opened">Refresh list</button>
                 <button id="review-more" class="hidden" type="button">Load more</button>
@@ -298,12 +299,12 @@
             <p id="handoff-import-error" class="error hidden" role="alert"></p>
             <button id="handoff-import-confirm" type="button" disabled>Confirm decision import</button>
         </section>
-        <section class="handoff-section" aria-label="GitHub PR handoff">
-            <h3>Optional GitHub PR submission</h3>
+        <section class="handoff-section" aria-label="PR handoff">
+            <h3>Optional PR submission</h3>
             <p id="handoff-provider" class="muted"></p>
             <p id="handoff-provider-status" class="muted" role="status" tabindex="-1"></p>
             <p id="handoff-provider-error" class="error hidden" role="alert"></p>
-            <label class="handoff-confirm"><input id="handoff-confirm" type="checkbox" disabled> I reviewed this exact Markdown and choose to send this summary as a comment-only PR review. This is not approval or a request for changes.</label>
+            <label class="handoff-confirm"><input id="handoff-confirm" type="checkbox" disabled> <span id="handoff-confirm-label">I reviewed this exact Markdown and choose to send this summary as a comment-only PR review. This is not approval or a request for changes.</span></label>
             <button id="handoff-submit" type="button" disabled>Submit comment-only PR review</button>
         </section>
     </dialog>
@@ -332,10 +333,17 @@
             <h2 id="repository-picker-title">Choose repository</h2>
             <button id="repository-picker-close" type="button">Close</button>
         </div>
-        <p class="muted">Review this local repository directly. This does not create a worktree, check out files, or change your Copilot session's workspace.</p>
+        <p class="muted">Open a local repository, or clone an Azure DevOps PR into a new folder. Your Copilot session's workspace is not changed.</p>
         <p id="repository-picker-error" class="error hidden" role="alert"></p>
+        <p id="repository-picker-status" class="muted" role="status" aria-live="polite"></p>
         <form id="repository-picker-form" class="prompt-editor">
-            <label>Repository path <input id="repository-path" required placeholder="C:\temp\agent-review-coverage-demo"></label>
+            <label>Source <select id="repository-source"><option value="local">Local repository</option><option value="ado">Azure DevOps PR URL</option></select></label>
+            <label id="repository-local-fields">Repository path <input id="repository-path" required placeholder="C:\temp\agent-review-coverage-demo"></label>
+            <div id="repository-ado-fields" class="hidden">
+                <label>Azure DevOps PR URL <input id="repository-pr-url" type="url" disabled required placeholder="https://dev.azure.com/org/project/_git/repo/pullrequest/42"></label>
+                <label>New clone destination <input id="repository-destination" disabled required placeholder="C:\src\new-repository"></label>
+                <p class="muted">Uses Azure CLI sign-in for PR access and separate Git credentials to clone. Choose a new directory under an existing parent. The clone stays on disk; no dependencies or tests run automatically.</p>
+            </div>
             <button id="repository-open" type="submit">Open repository</button>
         </form>
     </dialog>

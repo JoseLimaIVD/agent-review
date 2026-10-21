@@ -42,6 +42,11 @@ export function createReviewHandoff(model, target, progress, { testRun, warnings
         `${counts.reviewed}/${counts.total} changed files marked reviewed; ${counts.pending} not reviewed; ${counts.followUp} need follow-up.`,
         "Human decisions do not prove correctness, resolve findings, complete AI analysis, or establish test coverage.", "",
         "## File decisions and follow-ups"];
+    if (target.provider === "ado") {
+        lines.splice(4, 0, `Azure DevOps PR: ${text(target.url)}`,
+            `Iteration: ${target.iteration} · Target branch: ${code(target.targetBranch)} · Target commit: ${code(target.targetRef)}`,
+            "This is a PR summary comment, not a commit-bound review. Freshness is checked before posting; the PR may change during the request.");
+    }
     lines.push(`Exported: ${artifact.exported_at} · Saved decision revision: ${progress.revision ?? 0}`);
     const ranked = files.filter((file) => {
         const entry = entries.get(fileReviewId(file.path));

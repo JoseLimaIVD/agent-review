@@ -13,7 +13,9 @@ import { assessCratePackageRisk } from "./crate-package-risk.mjs";
 import { buildPackageUsageContext } from "./package-context.mjs";
 import { CustomPromptStore } from "./custom-prompts.mjs";
 import { customAnalysisContext, validateCustomAnalysis } from "./custom-analysis.mjs";
-import { resolveReviewTarget } from "./review-target.mjs";
+import { listReviewTargets, resolveReviewTarget } from "./review-target.mjs";
+import { cloneAdoReview } from "./ado-clone.mjs";
+import { submitAdoHandoff } from "./ado-provider.mjs";
 import { buildSessionContext, findSessionAttribution, mergeSessionContexts } from "./session-context.mjs";
 import { spawnOwnedAnalyzer } from "./ownership-guard.mjs";
 import { fingerprintWorktree } from "./worktree-changes.mjs";
@@ -145,8 +147,8 @@ export function runAnalyzerProcess(executable, args, onProgress = () => {}, opti
         });
         child.stdout.on("data", (chunk) => {
             outputBytes += chunk.length;
-            if (outputBytes > 128 * 1024 * 1024) {
-                failure = new Error("Analyzer output exceeded 128 MB.");
+            if (outputBytes > 256 * 1024 * 1024) {
+                failure = new Error("Analyzer output exceeded 256 MB.");
                 child.stop();
                 return;
             }
@@ -292,7 +294,14 @@ export class ReviewState {
         this.worktreeMonitorOwners = 0;
         this.workspacePath = options.workspacePath;
         this.reviewProgressStore = new ReviewProgressStore(this.workspacePath);
-        this.submitHandoffReview = options.submitHandoffReview || submitGitHubHandoff;
+        this.adoClient = options.adoClient;
+        this.runTargetCommand = options.runTargetCommand;
+        this.cloneAdoReview = options.cloneAdoReview || ((input, onProgress) => cloneAdoReview(input, {
+            onProgress, adoClient: this.adoClient, run: this.runTargetCommand,
+        }));
+        this.repositoryOpen = null;
+        this.submitHandoffReview = options.submitHandoffReview || ((input) => input.target?.provider === "ado"
+            ? submitAdoHandoff(input, this.adoClient) : submitGitHubHandoff(input));
         this.handoffPreview = null;
         this.generatedObservations = [];
         this.selection = null;
@@ -405,8 +414,11 @@ export class ReviewState {
             provider: this.handoffSubmitting ? { available: false, pending: true, url: target.url, commit: model.metadata.head_sha,
                 reason: "Awaiting the previous submission receipt. Local export is available; do not submit again." }
                 : result.markdown.length > 60_000 ? { available: false, reason: "This summary exceeds the bounded PR review size. Export locally instead; nothing will be submitted." }
-                : target.mode === "pr" && Boolean(target.url) ? { available: true, url: target.url, commit: model.metadata.head_sha }
-                : { available: false, reason: "Provider submission requires a loaded GitHub PR target. Local and commit reviews can export without creating a PR." } };
+                : target.mode === "pr" && Boolean(target.url) ? { available: true, url: target.url, commit: model.metadata.head_sha,
+                    name: target.provider === "ado" ? "Azure DevOps" : "GitHub",
+                    authorization: target.provider === "ado" ? "Azure CLI sign-in" : "gh CLI authorization",
+                    limitation: target.provider === "ado" ? "Posts a PR summary comment, not a commit-bound review. Freshness is checked before posting; the PR may change during the request." : null }
+                : { available: false, reason: "Provider submission requires a loaded GitHub or Azure DevOps PR target. Local and commit reviews can export without creating a PR." } };
     }
 
     async importHandoff({ artifact, revision, confirm = false }) {
@@ -439,11 +451,11 @@ export class ReviewState {
         if (confirm !== true || !preview || token !== preview.token || preview.consumed || this.handoffSubmitting || Date.now() - preview.created > 15 * 60_000) {
             throw new Error("A fresh preview and explicit confirmation are required; nothing was submitted.");
         }
-        if (this.loading || this.model !== preview.model || this.reviewTarget !== preview.target || preview.target.mode !== "pr") {
+        if (this.loading || this.switchingRepository || this.switchingTarget || this.model !== preview.model || this.reviewTarget !== preview.target || preview.target.mode !== "pr") {
             throw new Error("The review target changed or is not a PR; nothing was submitted.");
         }
         const progress = await this.progressForReview();
-        if (preview.consumed || this.handoffSubmitting || this.loading || this.model !== preview.model || this.reviewTarget !== preview.target
+        if (preview.consumed || this.handoffSubmitting || this.switchingRepository || this.switchingTarget || this.loading || this.model !== preview.model || this.reviewTarget !== preview.target
             || progress.snapshot !== preview.snapshot || progress.revision !== preview.revision) {
             throw new Error("Review decisions changed. Prepare a new preview before submitting.");
         }
@@ -451,13 +463,14 @@ export class ReviewState {
         this.handoffSubmitting = true;
         try {
             return await this.submitHandoffReview({ url: preview.target.url, commit: preview.model.metadata.head_sha,
-                body: preview.body, cwd: this.repoRoot });
+                body: preview.body, cwd: this.repoRoot, target: preview.target });
         } finally { this.handoffSubmitting = false; }
     }
 
     snapshot() {
         return {
             repo_root: this.repoRoot,
+            repository_open: this.repositoryOpen,
             model: this.model,
             loading: this.loading,
             cancelled: this.cancelled,
@@ -492,23 +505,30 @@ export class ReviewState {
 
     async setRepository(input) {
         if (this.disposed) throw new Error("This review has been closed.");
-        if (!input || typeof input.repoPath !== "string" || !input.repoPath.trim()) {
+        if (!input || (!input.prUrl && (typeof input.repoPath !== "string" || !input.repoPath.trim()))) {
             throw new Error("Enter the local path of the repository to review.");
         }
         if (input.baseRef !== undefined && input.baseRef !== null && typeof input.baseRef !== "string") {
             throw new Error("baseRef must be a string.");
         }
-        if (this.loading || this.refreshPromise || this.switchingTarget || this.switchingRepository
+        if (this.loading || this.refreshPromise || this.switchingTarget || this.switchingRepository || this.handoffSubmitting
             || this.packageRiskPromises.size || this.packageAssessmentPromises.size) {
             throw new Error("Wait for the active analysis or package assessment to finish before changing repositories.");
         }
         this.switchingRepository = true;
         const generation = this.reviewGeneration;
+        let prepared;
         try {
-            const repoRoot = await resolveRepoRoot(input.repoPath.trim());
+            if (input.prUrl) {
+                prepared = await this.cloneAdoReview(input, (progress) => {
+                    this.repositoryOpen = progress;
+                    this.broadcast("repository-open-progress");
+                });
+            }
+            const repoRoot = await resolveRepoRoot(prepared?.repoPath || input.repoPath.trim());
             const config = await loadReviewConfig(repoRoot);
             if (this.disposed) throw new Error("This review has been closed.");
-            if (generation !== this.reviewGeneration || this.loading || this.refreshPromise || this.switchingTarget
+            if (generation !== this.reviewGeneration || this.loading || this.refreshPromise || this.switchingTarget || this.handoffSubmitting
                 || this.packageRiskPromises.size || this.packageAssessmentPromises.size) {
                 throw new Error("The review changed while validating the repository. Try again.");
             }
@@ -525,7 +545,7 @@ export class ReviewState {
             this.baseRef = this.worktreeBaseRef;
             this.resolveBaseRef = async () => this.repositoryBaseOverride
                 || (await loadReviewConfig(this.repoRoot)).base_ref || process.env.COPILOT_DEFAULT_BRANCH || null;
-            this.reviewTarget = { mode: "none", label: "Choose review target", currentRef: null };
+            this.reviewTarget = prepared?.target || { mode: "none", label: "Choose review target", currentRef: null };
             this.model = null;
             this.reviewEvidence = null;
             this.reviewEvidenceModel = null;
@@ -562,9 +582,19 @@ export class ReviewState {
             this.loading = false;
             this.progress = null;
             this.broadcast("repository-changed");
+            if (prepared) {
+                this.repositoryOpen = { phase: "analyzing", message: `Analyzing ${this.reviewTarget.label} in ${repoRoot}...` };
+                this.broadcast("repository-open-progress");
+                await this.refresh({ repositorySwitch: true });
+            }
             return this.snapshot();
+        } catch (error) {
+            if (prepared) throw new Error(`${error.message} The completed clone remains at ${prepared.repoPath}.`);
+            throw error;
         } finally {
             this.switchingRepository = false;
+            this.repositoryOpen = null;
+            this.broadcast("repository-open-finished");
         }
     }
 
@@ -634,8 +664,9 @@ export class ReviewState {
     }
 
 
-    async refresh() {
+    async refresh({ repositorySwitch = false } = {}) {
         if (this.disposed) throw new Error("This review has been closed.");
+        if (this.switchingRepository && !repositorySwitch) throw new Error("Wait for the repository open operation to finish.");
         if (this.cancelPromise) await this.cancelPromise;
         if (this.refreshPromise) return this.refreshPromise;
         const run = { controller: new AbortController() };
@@ -814,13 +845,13 @@ export class ReviewState {
     }
 
     async setReviewTarget(input) {
-        if (this.refreshPromise || this.switchingTarget) throw new Error("Wait for the current analysis or review switch to finish.");
+        if (this.refreshPromise || this.switchingTarget || this.switchingRepository || this.handoffSubmitting) throw new Error("Wait for the current analysis, repository open, or submission to finish.");
         if (this.packageRiskPromises.size || this.packageAssessmentPromises.size) {
             throw new Error("Wait for the current package assessment to finish before switching reviews.");
         }
         this.switchingTarget = true;
         try {
-            const resolved = await resolveReviewTarget(this.repoRoot, input);
+            const resolved = await resolveReviewTarget(this.repoRoot, input, this.runTargetCommand, { adoClient: this.adoClient });
             this.stopInternalReviews();
             this.saveCurrentReview();
             this.reviewTarget = resolved;
@@ -872,7 +903,12 @@ export class ReviewState {
 
     reviewCacheKey(target = this.reviewTarget) {
         return JSON.stringify([target.mode, target.currentRef || null,
-            target.mode === "worktree" ? this.worktreeBaseRef : target.baseRef]);
+            target.mode === "worktree" ? this.worktreeBaseRef : target.baseRef,
+            ...(target.mode === "pr" ? [target.provider || "github", target.url || target.ref] : [])]);
+    }
+
+    listReviewTargets(input) {
+        return listReviewTargets(this.repoRoot, input, this.runTargetCommand, { adoClient: this.adoClient });
     }
 
     saveCurrentReview() {

@@ -109,11 +109,16 @@ different content or conflicting existing decisions is rejected, not replaced
 with newer worktree source. Binary/unsnapshotted worktree content cannot be
 verified for portable import and is explicitly unsupported.
 
-For a loaded GitHub PR, the same preview supports an explicitly selected,
-confirmed **comment-only** review through the existing `gh` CLI authorization.
-It never approves or requests changes. The original commit is pinned and the PR
-head is rechecked before posting; changed targets/decisions, stale previews and
-duplicate submissions are rejected. A network failure may leave the remote
+For a loaded GitHub or Azure DevOps PR, the same preview supports explicitly
+confirmed **comment-only** publishing. GitHub uses existing `gh` authorization
+and a commit-bound review; Azure DevOps uses Azure CLI sign-in and a single
+top-level summary comment. Neither approves, requests changes, changes reviewer
+votes, or changes PR status. The saved source is pinned and PR freshness is
+rechecked before posting; changed targets/decisions, stale previews and
+duplicate submissions from the same preview are rejected. ADO's general comment
+API does not atomically bind a comment to a commit: the exact body identifies the
+reviewed base/head and iteration, but the PR can change during the request.
+A network failure may leave the remote
 outcome unknown: check the PR before preparing another submission. Local and
 commit reviews remain fully usable without creating a PR.
 
@@ -394,9 +399,17 @@ require approval. Checks use isolated, tool-free Copilot sessions and cannot edi
 ## Install and open
 
 Requires a Git repository, Python **3.11+**, Node.js **20+** on PATH, and a
-**GitHub Copilot app with Canvas extension support**. PR reviews support
-**github.com only** and require the `gh` CLI and `gh auth login`; private
+**GitHub Copilot app with Canvas extension support**. GitHub PR reviews support
+**github.com** and require the `gh` CLI and `gh auth login`; private
 repositories also need HTTPS Git credentials (for example, `gh auth setup-git`).
+Azure DevOps PR reviews support **Azure DevOps Services** (`dev.azure.com` and
+legacy `organization.visualstudio.com` URLs), not on-premises Azure DevOps
+Server. Install Azure CLI and run `az login` in the organization's tenant.
+No Azure DevOps CLI extension or PAT is required. Configure Git credentials
+separately (for example Git Credential Manager); API sign-in does not authorize
+Git cloning/fetching. Existing ADO clones may also use standard ADO SSH remotes;
+URL-based cloning uses HTTPS. Credential prompts are noninteractive, so complete
+Git sign-in/setup before opening a PR.
 No separate model API key or Python packages are needed for the analyzer.
 On Windows, the extension uses `py -3` to select an installed Python 3 runtime;
 Python 3.11 specifically is not required when a newer supported version is installed.
@@ -642,6 +655,8 @@ separate **128 Mi-character JSON request limit** accommodates both snapshots and
 JSON escaping/metadata overhead; it does not increase the analysis budgets.
 Oversized or invalid requests fail with an error rather than silently dropping
 files. File, project-context, symbol and edge caps report incomplete analysis.
+The extension bounds the complete analyzer response at **256 MiB**; larger
+responses fail explicitly rather than truncating the saved review.
 
 Scanning reads **both saved trees** and never invokes reviewed MSBuild targets,
 restores packages, builds projects, or executes reviewed code. Project XML is
@@ -756,6 +771,46 @@ Opening Agent Review does not analyze any snapshot. Choose Worktree, Commit, or
 Pull request first. Selecting Worktree starts its analysis immediately; switching
 to Commit or Pull request loads a list, and selecting an item starts that review.
 PR objects are fetched without checking out files or changing your worktree.
+
+The PR list detects GitHub or Azure DevOps from the repository's fetch remotes.
+It prefers `origin`; when several supported remotes exist you can select a
+different one, and ambiguous repositories without an origin require a choice.
+The list is repository-scoped, not an organization-wide inbox. ADO includes active,
+completed, abandoned, and draft PRs; dates are labeled **created** or **closed**,
+not presented as last activity. ADO reviews compare the latest source iteration
+with a validated target snapshot's merge base, not the synthetic merge result.
+Fork source objects are fetched from their own repository. Missing objects,
+incomplete iterations, ambiguous merge bases, and moving branches produce
+explicit errors rather than substituting worktree content.
+
+To open an ADO PR without a local clone, choose **Change repository → Source →
+Azure DevOps PR URL**. Enter a clean URL such as
+`https://dev.azure.com/organization/project/_git/repository/pullrequest/42`
+(legacy `https://organization.visualstudio.com/project/_git/repository/pullrequest/42`
+also works), and an absolute **new clone destination** under an existing parent.
+Choose **Clone and review PR** to validate access, clone, fetch the pinned source,
+and open its review. Spaces in project/repository names may be URL-encoded.
+The destination must not already exist; nothing is overwritten or deleted.
+Cloning creates a normal checkout without recursive submodules, and does not
+install dependencies, build, or run tests. Existing local-clone PR review still
+does not check out files. A completed clone remains yours after closing the
+canvas or session. If cloning fails, an incomplete destination may remain;
+inspect it before choosing a new destination. Preparation failures leave the
+previous review open. Reconnecting never automatically repeats a clone or post.
+
+Use **Finish → Preview / export handoff** to inspect the exact ADO summary,
+destination, reviewed commit, and API limitation. Explicit confirmation enables
+**Post PR summary comment**. Publishing requires an active, unchanged PR with
+the same iteration, source, target commit, and branch identities; a completed,
+abandoned, retargeted, or updated PR must be reopened before preparing a new
+preview. No inline threads or reviewer votes are posted. Local Markdown/JSON
+exports remain available without a PR or comment permissions.
+
+If ADO access fails, check Azure CLI installation, `az login`/tenant selection,
+organization membership, and repository or comment permissions. If cloning or
+fetching fails, check Git credentials separately. An uncertain publishing outcome
+requires inspecting the PR before preparing another submission; writes are
+never automatically retried.
 
 Worktree selection honors Git ignore rules, including nested/global/local rules
 and negations. Tracked files remain eligible even when ignored; standard generated

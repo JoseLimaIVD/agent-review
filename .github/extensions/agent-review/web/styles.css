@@ -1701,6 +1701,7 @@ h3 { font-size: 14px; font-weight: 600; }
 .review-target-form button { background: var(--cp-surface-soft); cursor: pointer; }
 .review-target-form button:disabled { opacity: .5; cursor: wait; }
 .review-target-form #review-ref { width: 100%; min-width: 0; max-width: none; text-overflow: ellipsis; }
+.review-target-form #review-remote { grid-column: 2 / -1; grid-row: 2; width: 100%; min-width: 0; text-overflow: ellipsis; }
 .review-target-form #review-more.hidden, .review-target-form #review-list-refresh.hidden, .review-target-form #review-ref.hidden { display: block !important; visibility: hidden; }
 .review-options-status { margin: 0 0 8px; color: var(--cp-text-muted); font-size: 12px; overflow-wrap: anywhere; }
 .review-options-status:empty { margin: 0; }
@@ -1859,6 +1860,15 @@ html { scrollbar-gutter: stable; }
 .prompt-editor { display: grid; gap: 12px; margin-top: 16px; font-size: 13px; }
 .prompt-editor h3 { margin: 0; font-size: 14px; }
 .prompt-editor > label:not(.prompt-enabled) { display: grid; gap: 4px; }
+#repository-ado-fields { display: grid; gap: 12px; min-width: 0; }
+#repository-ado-fields label { display: grid; gap: 4px; min-width: 0; }
+#repository-picker input { min-width: 0; width: 100%; box-sizing: border-box; }
+#repository-picker-status, #handoff-provider { overflow-wrap: anywhere; }
+#repository-open { background: var(--cp-primary); color: var(--cp-accent-fg); border-color: var(--cp-primary); }
+#repository-open:hover:not(:disabled) { background: var(--cp-primary-hover); }
+@media (max-width: 900px) {
+  .review-target-form #review-remote { grid-column: 1 / -1; grid-row: 3; }
+}
 .prompt-editor textarea { resize: vertical; width: 100%; box-sizing: border-box; }
 .custom-analyses button:hover:not(:disabled), .prompt-manager button:hover:not(:disabled) { background: var(--pr-hover); }
 .prompt-editor input:not([type="checkbox"]), .prompt-editor select, .prompt-editor textarea { background: var(--cp-surface); }

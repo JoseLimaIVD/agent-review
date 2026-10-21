@@ -54,6 +54,9 @@ try {
         await page.locator("#repository-path").fill(demo);
         await page.getByRole("button", { name: "Open repository", exact: true }).click();
         await page.waitForFunction((root) => document.querySelector("#repository-identity").textContent.includes(root)
+            && !document.querySelector("#repository-picker").open, demo, { timeout: 60000 });
+        await page.selectOption("#review-mode", "worktree");
+        await page.waitForFunction((root) => document.querySelector("#repository-identity").textContent.includes(root)
             && document.querySelector("#status").textContent === "Analysis current", demo, { timeout: 60000 });
         assert.equal(await page.locator("#repository-picker").isVisible(), false);
         assert.equal(await page.locator("#clean-review").isVisible(), false);
