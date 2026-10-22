@@ -6,10 +6,12 @@ function buildCodePathRequest(model) {
     if (!(model?.symbols || []).some((symbol) => symbol.language === "csharp"
         && ["method", "property"].includes(symbol.kind)
         && ["added", "modified", "removed"].includes(symbol.classification))) return null;
+    if (model.code_paths?.csharp) return { precomputed: model.code_paths.csharp };
     const baseline = {};
     const current = {};
     for (const [path, saved] of Object.entries(model.source_files || {})) {
         if (saved.binary || !Object.hasOwn(saved, "baseline")) continue;
+        if (!/\.(?:cs|csproj|slnx?|props|targets)$|(?:^|[\\/])(?:global\.json|nuget\.config|\.editorconfig)$/i.test(path)) continue;
         if (typeof saved.baseline === "string") baseline[path] = saved.baseline;
         if (typeof saved.current === "string") current[path] = saved.current;
     }

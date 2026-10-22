@@ -68,13 +68,24 @@ class DotnetAdapterTests(unittest.TestCase):
         payload = helper.call_args.args[0]
         self.assertEqual(payload["baseline"]["App.cs"], before["App.cs"].decode())
         self.assertEqual(payload["current"]["App.cs"], after["App.cs"].decode())
-        self.assertEqual(payload["mode"], "graph")
+        self.assertEqual(payload["mode"], "decisions")
         self.assertIn("custom.props", payload["current"])
         self.assertEqual(model.source_files["App.cs"]["baseline"], before["App.cs"].decode())
         self.assertIn("References incomplete", model.warnings)
         self.assertEqual(model.symbols[0]["range"], {"start_line": 1, "end_line": 1})
         self.assertTrue(dotnet_input_path(".editorconfig"))
         self.assertFalse(dotnet_input_path("readme.md"))
+
+    def test_scan_retains_code_paths_from_the_same_compiler_pass(self):
+        saved = AnalysisSnapshot(Path("."), {}, {"App.cs": b"class App {}"}, None, False, False)
+        model = ReviewModel({})
+        facts = {"symbols": [], "edges": [], "warnings": ["Snapshot analysis limited"],
+                 "code_paths": {"callables": [], "totals": {}, "limited": True, "warnings": []}}
+        with patch("dotnet_adapter.run_dotnet_helper", return_value=facts) as helper:
+            DOTNET_ADAPTER.scan(saved, model, {}, lambda *_: None)
+        self.assertEqual(helper.call_count, 1)
+        self.assertEqual(model.code_paths["csharp"]["warnings"], ["Snapshot analysis limited"])
+        self.assertTrue(model.to_dict()["code_paths"]["csharp"]["limited"])
 
     def test_missing_helper_never_builds_and_reports_preparation(self):
         with patch("dotnet_adapter.helper_path", return_value=Path("missing-helper-test.dll").resolve()):

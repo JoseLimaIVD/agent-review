@@ -1,10 +1,12 @@
 import { execFile } from "node:child_process";
+import { constants as bufferConstants } from "node:buffer";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { gunzipSync } from "node:zlib";
 import { assessPackageRisk } from "./package-risk.mjs";
 import { assessNpmPackageRisk } from "./node-package-risk.mjs";
 import { assessGoModuleRisk } from "./go-package-risk.mjs";
@@ -204,7 +206,11 @@ export function runAnalyzerProcess(executable, args, onProgress = () => {}, opti
                 return;
             }
             try {
-                resolve(restoreSharedBaselines(JSON.parse(Buffer.concat(stdout).toString("utf8"))));
+                const output = Buffer.concat(stdout);
+                const json = options.gzip
+                    ? gunzipSync(output, { maxOutputLength: bufferConstants.MAX_STRING_LENGTH }).toString("utf8")
+                    : output.toString("utf8");
+                resolve(restoreSharedBaselines(JSON.parse(json)));
             } catch (error) {
                 reject(new Error(`Analyzer returned invalid JSON: ${error.message}`));
             }
@@ -224,13 +230,13 @@ export function restoreSharedBaselines(model) {
 }
 
 export async function runAnalyzer(repoRoot, baseRef, onProgress, currentRef = null, options = {}) {
-    const args = [analyzerPath, "--repo", repoRoot];
+    const args = [analyzerPath, "--repo", repoRoot, "--gzip"];
     if (baseRef) args.push("--base-ref", baseRef);
     if (currentRef) args.push("--current-ref", currentRef);
     const failures = [];
     for (const [executable, prefix] of pythonCandidates()) {
         try {
-            return await runAnalyzerProcess(executable, [...prefix, ...args], onProgress, options);
+            return await runAnalyzerProcess(executable, [...prefix, ...args], onProgress, { ...options, gzip: true });
         } catch (error) {
             options.signal?.throwIfAborted();
             if (error.code !== "ENOENT") throw error;
@@ -266,6 +272,8 @@ export function attachCoverage(map, model) {
 }
 
 export async function runDecisionExtractor(request, options = {}) {
+    options.signal?.throwIfAborted();
+    if (request.precomputed) return { ...request.precomputed, adapter_id: request.adapter_id };
     const directory = await mkdtemp(join(tmpdir(), "agent-review-decisions-"));
     const input = join(directory, "request.json");
     try {
@@ -1085,7 +1093,7 @@ export class ReviewState {
         });
     }
 
-    // Runs after analysis completes so it never lengthens the repository scan.
+    // C# reuses the scan's compiler result; other adapters extract paths after the scan.
     startDecisionMap() {
         const model = this.model;
         this.decisionController?.abort();

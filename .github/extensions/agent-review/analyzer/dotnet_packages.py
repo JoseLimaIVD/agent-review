@@ -110,8 +110,11 @@ def parse_dotnet_packages(
     warnings = warnings if warnings is not None else []
     files = {path.replace("\\", "/"): raw for path, raw in files.items()}
     documents: dict[str, tuple[Element, dict[int, int]]] = {}
+    central_by_directory: dict[PurePosixPath, str] = {}
     for path, raw in sorted(files.items()):
         if path.lower().endswith(".csproj") or PurePosixPath(path).name.lower() == "directory.packages.props":
+            if PurePosixPath(path).name.lower() == "directory.packages.props":
+                central_by_directory.setdefault(PurePosixPath(path).parent, path)
             try:
                 documents[path] = _xml_document(raw)
                 if documents[path][0].tag != "Project":
@@ -134,9 +137,8 @@ def parse_dotnet_packages(
         root, lines = documents[project]
         central_path = None
         for parent in (PurePosixPath(project).parent, *PurePosixPath(project).parent.parents):
-            candidates = [path for path in files if PurePosixPath(path).parent == parent and PurePosixPath(path).name.lower() == "directory.packages.props"]
-            if candidates:
-                central_path = sorted(candidates)[0]
+            if parent in central_by_directory:
+                central_path = central_by_directory[parent]
                 break
         central: dict[str, list[tuple[Element, bool]]] = {}
         if central_path in documents:

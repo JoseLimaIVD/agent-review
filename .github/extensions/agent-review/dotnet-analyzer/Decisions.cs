@@ -408,20 +408,24 @@ internal static class DecisionAnalysis
 
     internal static List<DecisionEntry> Diff(List<Decision> before, List<Decision> after)
     {
+        var beforeKeys = before.Select(d => Key(d)).ToArray();
+        var afterKeys = after.Select(d => Key(d)).ToArray();
         var pairs = new List<(int Old, int New, bool Changed)>();
         var available = Enumerable.Range(0, after.Count).ToHashSet();
         var unpaired = new List<int>();
         for (var i = 0; i < before.Count; i++)
         {
-            var found = available.Order().FirstOrDefault(j => Key(before[i]) == Key(after[j]), -1);
+            var found = available.Order().FirstOrDefault(j => beforeKeys[i] == afterKeys[j], -1);
             if (found < 0) { unpaired.Add(i); continue; }
             pairs.Add((i, found, false));
             available.Remove(found);
         }
         // Same outcome/kind pairs capture changed thresholds and guard/value expressions.
+        var beforeSkeletons = unpaired.ToDictionary(i => i, i => Key(before[i], true));
+        var afterSkeletons = available.ToDictionary(j => j, j => Key(after[j], true));
         foreach (var i in unpaired.ToArray())
         {
-            var found = available.Where(j => Key(before[i], true) == Key(after[j], true))
+            var found = available.Where(j => beforeSkeletons[i] == afterSkeletons[j])
                 .OrderByDescending(j => Similarity(before[i], after[j])).ThenBy(j => Math.Abs(i - j))
                 .ThenBy(j => j).FirstOrDefault(-1);
             if (found < 0) continue;

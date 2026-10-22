@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import gzip
+import io
 import json
 import sys
+from typing import Any, TextIO
 
 from churn import analyze_churn
 from codeboarding_adapter import load_codeboarding
@@ -116,6 +119,7 @@ def parser() -> argparse.ArgumentParser:
     value.add_argument("--repo", help="Path within the git repository")
     value.add_argument("--base-ref", help="Git revision used as the baseline")
     value.add_argument("--current-ref", help="Analyze a committed tree instead of the worktree")
+    value.add_argument("--gzip", action="store_true", help="Write the complete JSON result as a gzip stream")
     value.add_argument("--no-cache", action="store_true", help="Scan Python files fresh without reading or writing the file cache")
     value.add_argument(
         "--exclude",
@@ -126,6 +130,32 @@ def parser() -> argparse.ArgumentParser:
     return value
 
 
+def write_review_json(result: dict[str, Any], output: TextIO) -> None:
+    encoder = json.JSONEncoder(sort_keys=True, separators=(",", ":"))
+    output.write("{")
+    for index, (key, value) in enumerate(sorted(result.items())):
+        if index:
+            output.write(",")
+        output.write(encoder.encode(key) + ":")
+        if isinstance(value, dict):
+            output.write("{")
+            for child_index, (child_key, child) in enumerate(sorted(value.items())):
+                if child_index:
+                    output.write(",")
+                output.write(encoder.encode(child_key) + ":" + encoder.encode(child))
+            output.write("}")
+        elif isinstance(value, list):
+            output.write("[")
+            for child_index, child in enumerate(value):
+                if child_index:
+                    output.write(",")
+                output.write(encoder.encode(child))
+            output.write("]")
+        else:
+            output.write(encoder.encode(value))
+    output.write("}\n")
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     try:
@@ -133,9 +163,15 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, RuntimeError, ValueError) as error:
         print(f"agent-review analyzer: {error}", file=sys.stderr)
         return 2
+    progress("serialization", "Writing the complete saved review result", 98)
+    result = model.to_dict()
+    if args.gzip:
+        with gzip.GzipFile(fileobj=sys.stdout.buffer, mode="wb", compresslevel=1, mtime=0) as compressed:
+            with io.TextIOWrapper(compressed, encoding="utf-8", newline="\n") as output:
+                write_review_json(result, output)
+    else:
+        write_review_json(result, sys.stdout)
     progress("complete", "Analysis complete", 100)
-    json.dump(model.to_dict(), sys.stdout, sort_keys=True, separators=(",", ":"))
-    sys.stdout.write("\n")
     return 0
 
 

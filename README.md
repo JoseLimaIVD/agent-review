@@ -50,6 +50,13 @@ The large sample's two failing tests are intentional; its guide identifies them.
 
 ### Understand the change
 
+**Worktree** compares the saved working tree with the configured comparison
+base, not necessarily `HEAD`. A stale local `main` can therefore include years
+of committed history even in a clean worktree. Use `origin/main` for the current
+remote-tracking baseline, or `HEAD` to review only uncommitted changes, when
+that is the intended scope. Agent Review does not silently replace an explicit
+baseline.
+
 A compact Overview keeps **Start review** or **Continue review**, focused-queue
 progress, and access to every changed file in the first screen. Priority items
 are a starting point, not a claim that all changed code has been reviewed.
@@ -614,6 +621,11 @@ For development or when the distribution is not yet available:
    npm ci --ignore-scripts --bin-links=false
    ```
 
+When updating a source installation, copy the changed runtime files and the
+rebuilt trusted Roslyn helper, then **reload extensions and reopen the canvas**.
+An existing canvas provider keeps its already-loaded JavaScript; retrying a
+failed review before reloading does not activate the new analyzer transport.
+
 The included `.npmrc` also disables executable links. Project extensions reject
 symbolic links, and Agent Review imports TypeScript directly without needing
 the `tsc` or `tsserver` command launchers.
@@ -679,6 +691,8 @@ standard Agent Review cache directory. `AGENT_REVIEW_DOTNET_CACHE` overrides
 that location. Content, compiler/extractor and parse configuration invalidate
 facts; semantic compilation, relationships and test links are rebuilt for
 each snapshot. `--no-cache` disables the scan's persistent .NET facts cache.
+C# code paths and test links are produced by that same compiler pass and
+reused by the provider. Long-running compiler work reports elapsed progress.
 
 Each saved C# snapshot supports up to **32 Mi source characters**. The helper's
 separate **128 Mi-character JSON request limit** accommodates both snapshots and
@@ -708,6 +722,21 @@ Malformed authoritative project/central manifests fail explicitly rather than
 being mistaken for package removals. Differing project pins remain visible in
 the saved declaration list; a grouped package does not acquire a guessed
 version-specific advisory result.
+Central-version manifests are indexed once per saved tree rather than
+rescanning every repository path for each project. Large review results use
+compressed analyzer transport, retaining complete saved source and evidence
+without hitting the 128 MiB uncompressed-output limit. The command-line
+analyzer still writes ordinary JSON by default; `--gzip` selects the compressed
+stream used by the provider. Scan progress identifies result serialization
+before reporting completion.
+Serialization uses complete-record buffers rather than one output write per
+JSON token, while preserving the same JSON data. Node coverage skips its
+snapshot transfer when neither saved nor eligible live report inputs exist;
+present reports still receive exact-source validation. Symbol line metrics
+use indexed line ranges instead of repeatedly rescanning whole-file changes.
+C# code-path requests retain saved compiler source and configuration only,
+matching the graph scan; unrelated assets and other languages are not copied
+into Roslyn's bounded input.
 
 Saved Coverlet **Cobertura XML** reports contribute line and branch evidence
 only for unambiguously matched C# snapshot paths. Reports must be tracked or
@@ -813,8 +842,11 @@ Returning to a target reuses its results while the provider remains running.
   remain reviewable as diffs. No findings is **not** a correctness guarantee;
   **Priority** ranks attention, not security.
 - Code path maps are static and cover changed, non-test callables in implemented languages
-  after analysis finishes, so they never lengthen the scan. They show conditions, not
+  and show conditions, not
   runtime reachability; very large reviews are bounded and labeled as partial.
+  C# graph and code paths share one Roslyn compilation pass; its saved path map
+  is reused after scanning instead of compiling the full snapshot twice.
+  Other language adapters extract paths after the graph scan.
 - Python worktree coverage accepts matching `coverage.json`, `coverage.xml`, or
   legacy JSON `.coverage` reports; a SQLite `.coverage` database alone is unsupported.
   Node coverage requires exact-source proof for supported Istanbul/LCOV reports;
@@ -1087,7 +1119,7 @@ Implemented language adapters are **Python**, **Node.js/TypeScript**, **C#/.NET*
   `python_adapter.py` delegates to the existing Python implementations, resolving
   its graph in an isolated model before merging facts. Python DTOs and the
   content-cache namespace are preserved, so existing warm scans remain reusable.
-- `language-adapters.mjs` routes post-scan code-path requests and test runners.
+- `language-adapters.mjs` routes code-path requests and test runners.
   `python-review-adapter.mjs` owns Python callable/test linkage and the parser
   process specification; `node-review-adapter.mjs` routes the Node compiler,
   static linkage, and isolated `node:test` runner; `dotnet-review-adapter.mjs`
@@ -1106,8 +1138,9 @@ resolve against their snapshot's project configuration, version their fact
 caches, and return the existing evidence DTOs. Do not restore packages, build,
 or execute repository code during scanning. Combined execution of different
 languages' test runners is deliberately rejected until its plan/result contract
-is implemented; Python runs continue unchanged. Code-path extraction and test
-linkage still start only after scanning, and tests run only by explicit action.
+is implemented; Python runs continue unchanged. C# reuses code-path extraction
+and test linkage from its graph compiler pass; other adapters start that work
+after scanning. Tests run only by explicit action.
 
 The [analyzer](.github/extensions/agent-review/analyzer/analyze.py) also runs
 standalone with `--repo <repository>` and emits `ReviewModel` JSON. Override Python
