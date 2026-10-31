@@ -4,8 +4,10 @@ import json
 import os
 import subprocess
 import tempfile
+import time
 import xml.etree.ElementTree as ET
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -28,7 +30,9 @@ def helper_path() -> Path:
     )
 
 
-def run_dotnet_helper(payload: dict[str, Any]) -> dict[str, Any]:
+def run_dotnet_helper(
+    payload: dict[str, Any], *, on_wait: Callable[[float], None] | None = None,
+) -> dict[str, Any]:
     helper = helper_path()
     if not helper.is_file():
         raise RuntimeError(
@@ -49,11 +53,21 @@ def run_dotnet_helper(payload: dict[str, Any]) -> dict[str, Any]:
                               or Path.home() / ".copilot" / "agent-review" / "file-cache")
             environment["AGENT_REVIEW_DOTNET_CACHE"] = str(cache_root / "dotnet-facts")
         try:
-            result = subprocess.run(
-                [os.environ.get("AGENT_REVIEW_DOTNET", "dotnet"), str(helper), "--input", str(request)],
-                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
-                env=environment,
-            )
+            with ThreadPoolExecutor(max_workers=1, thread_name_prefix="agent-review-dotnet") as executor:
+                started = time.monotonic()
+                pending = executor.submit(
+                    subprocess.run,
+                    [os.environ.get("AGENT_REVIEW_DOTNET", "dotnet"), str(helper), "--input", str(request)],
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
+                    env=environment,
+                )
+                while True:
+                    try:
+                        result = pending.result(timeout=5)
+                        break
+                    except FutureTimeout:
+                        if on_wait:
+                            on_wait(time.monotonic() - started)
         except FileNotFoundError as error:
             raise RuntimeError("C# analysis requires dotnet on PATH or AGENT_REVIEW_DOTNET; "
                                "install a local .NET 10 runtime/SDK. No reviewed code was executed.") from error
@@ -69,6 +83,25 @@ def run_dotnet_helper(payload: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(value, dict):
             raise RuntimeError("Roslyn helper output must be a JSON object.")
         return value
+
+
+def normalize_code_paths(facts: dict) -> dict:
+    result = facts["code_paths"]
+    names = {symbol["id"]: symbol["qualname"] for symbol in facts.get("symbols", [])}
+    for callable in result.get("callables", []):
+        scope = callable["id"].split("::", 1)[0]
+        callable["language"] = "csharp"
+        callable["ecosystem"] = "nuget"
+        callable["compiler_scope"] = scope
+        callable["target_framework"] = scope.rsplit("@", 1)[-1] if "@" in scope else None
+    for test in result.get("verification", {}).get("tests", []):
+        targets = test.get("callables", test["calls"])
+        test["callables"] = sorted({names.get(identifier, identifier) for identifier in targets})
+        if test["link"] == "reachable":
+            test["link"] = "via"
+            test.setdefault("via", "a resolved production caller")
+    result.setdefault("warnings", []).extend(facts.get("warnings", []))
+    return result
 
 
 class DotnetAdapter:
@@ -112,7 +145,11 @@ class DotnetAdapter:
             saved = model.source_files.setdefault(path, {})
             saved["baseline"] = trees["baseline"].get(path)
             saved["current"] = trees["current"].get(path)
-        facts = run_dotnet_helper({**trees, "mode": "graph", "use_cache": snapshot.use_cache})
+        facts = run_dotnet_helper({**trees, "mode": "decisions", "use_cache": snapshot.use_cache},
+            on_wait=lambda elapsed: progress(
+                f"Roslyn is resolving saved C# relationships and code paths · {round(elapsed):,}s elapsed", 65))
+        if "code_paths" in facts:
+            model.code_paths["csharp"] = normalize_code_paths(facts)
         model.warnings.extend(facts.get("warnings", []))
         model.repository["csharp_loc"] = sum(len(data.splitlines()) for path, data in trees["current"].items()
                                              if path.lower().endswith(".cs"))

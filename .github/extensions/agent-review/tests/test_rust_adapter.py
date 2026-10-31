@@ -13,10 +13,32 @@ from review_model import ReviewModel
 from rust_adapter import RUST_ADAPTER
 from rust_coverage import load_rust_coverage
 from rust_decisions import build as build_decisions
+from rust_graph import _mask, _scan_side
 from rust_packages import cargo_package_diff, parse_cargo_packages
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "rust-demo"
+
+WRAPPED_LIMIT = """pub fn limit(
+    attempts: u32,
+    window: [u8; 4],
+) -> bool {
+    if attempts > {threshold} {
+        return false;
+    }
+    window[0] == 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blocks_after_limit() {
+        assert!(!limit(9, [0; 4]));
+    }
+}
+"""
 
 
 def tree(name: str) -> dict[str, bytes]:
@@ -136,6 +158,93 @@ class RustAdapterTests(unittest.TestCase):
         self.assertTrue(any(entry["status"] in {"added", "changed"} for entry in report["callables"][0]["entries"]))
         self.assertEqual(report["verification"]["tests"][0]["name"], "tests::accepts_large_values")
         self.assertIn(score["id"], report["verification"]["tests"][0]["callables"])
+
+    def test_wrapped_signatures_where_clauses_array_parameters_and_macro_templates(self):
+        source = b"""pub struct Cache<K, V>
+where
+    K: Eq,
+{
+    items: Vec<(K, V)>,
+}
+
+impl Cache<String, u32> {
+    pub fn get(
+        &self,
+        key: &String,
+    ) -> Option<&u32> {
+        self.items.iter().find(|(k, _)| k == key).map(|(_, v)| v)
+    }
+}
+
+pub fn checksum(bytes: [u8; 4]) -> u32 {
+    bytes.iter().map(|b| *b as u32).sum()
+}
+
+macro_rules! getter {
+    ($name:ident) => {
+        pub fn $name(
+            &self,
+        ) -> u32 {
+            0
+        }
+    };
+}
+"""
+        symbols = {item["qualname"]: item for item in _scan_side({"src/lib.rs": source}, [])["symbols"].values()}
+        self.assertEqual(symbols["Cache"]["kind"], "struct")
+        self.assertEqual(symbols["Cache::get"]["kind"], "method")
+        self.assertEqual(symbols["Cache::get"]["parent_identity"], symbols["Cache"]["identity"])
+        self.assertEqual(symbols["Cache::get"]["range"], {"start_line": 9, "end_line": 14})
+        self.assertEqual(symbols["Cache::get"]["signature"], "pub fn get( &self, key: &String, ) -> Option<&u32>")
+        # `;` inside `[u8; 4]` does not end the signature, so the body belongs to the function.
+        self.assertEqual(symbols["checksum"]["range"], {"start_line": 17, "end_line": 19})
+        self.assertFalse(any(name.startswith("$") for name in symbols))
+
+    def test_character_literals_preserve_following_symbols_and_function_digests(self):
+        literals = ("'_'", "'a'", "'Z'", "b'a'", "'{'", "'}'", "'\u03bb'",
+                    r"'\''", r"'\\'", r"'\n'", r"'\x7f'", r"'\u{1f980}'")
+        for literal in literals:
+            with self.subTest(literal=literal):
+                first = f"pub fn first() {{\n    let value = {literal};\n}}"
+                before = first + "\n"
+                after = before + "pub fn added() {}\n"
+                old = _scan_side({"src/lib.rs": before.encode()}, [])["symbols"]
+                new = _scan_side({"src/lib.rs": after.encode()}, [])["symbols"]
+                symbols = {item["name"]: item for item in new.values()}
+                self.assertEqual(set(symbols), {"first", "added"})
+                self.assertEqual(symbols["first"]["range"], {"start_line": 1, "end_line": 3})
+                self.assertEqual(symbols["added"]["range"], {"start_line": 4, "end_line": 4})
+                self.assertEqual(symbols["first"]["digest"], hashlib.sha256(first.encode()).hexdigest())
+                self.assertEqual(next(iter(old.values()))["digest"], symbols["first"]["digest"])
+                self.assertEqual(len(_mask(after)), len(after))
+                self.assertEqual(_mask(after).count("\n"), after.count("\n"))
+
+    def test_lifetimes_and_loop_labels_are_not_masked_as_literals(self):
+        source = """pub fn borrow<'a>(value: &'a str) -> &'a str {
+    'retry: loop { break 'retry value; }
+}
+pub fn anonymous(value: &'_ str) {}
+pub fn unicode<'\u03bb>(value: &'\u03bb str) -> &'\u03bb str { value }
+"""
+        self.assertEqual(_mask(source), source)
+        symbols = _scan_side({"src/lib.rs": source.encode()}, [])["symbols"].values()
+        self.assertEqual({item["name"] for item in symbols}, {"borrow", "anonymous", "unicode"})
+
+    def test_wrapped_function_code_paths_and_test_links(self):
+        before = WRAPPED_LIMIT.replace("{threshold}", "3")
+        after = WRAPPED_LIMIT.replace("{threshold}", "5")
+        limit = next(item for item in _scan_side({"src/lib.rs": after.encode()}, [])["symbols"].values()
+                     if item["qualname"] == "limit")
+        report = build_decisions({
+            "baseline": {"src/lib.rs": before}, "current": {"src/lib.rs": after},
+            "callables": [{"id": limit["id"], "qualname": "limit"}],
+        })
+        changed = [entry for entry in report["callables"][0]["entries"] if entry["status"] == "changed"]
+        self.assertEqual([(entry["decision"]["value"], entry["decision"]["when"]) for entry in changed],
+                         [("false", ["attempts > 5"])])
+        self.assertEqual(changed[0]["base"]["when"], ["attempts > 3"])
+        self.assertEqual(report["verification"]["tests"][0]["name"], "tests::blocks_after_limit")
+        self.assertEqual(report["verification"]["tests"][0]["callables"], [limit["id"]])
 
     def test_coverage_requires_revision_and_source_hash_match(self):
         after = tree("changed")

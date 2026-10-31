@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -102,6 +103,8 @@ class ReviewModel:
     )
     evidence: list[dict[str, Any]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    code_paths: dict[str, Any] = field(default_factory=dict)
+    instruction_documents: dict[str, Any] = field(default_factory=dict)
 
     def add_evidence(self, kind: str, data: dict[str, Any]) -> str:
         canonical = json.dumps(data, sort_keys=True, separators=(",", ":"))
@@ -187,6 +190,8 @@ class ReviewModel:
             for item in sorted(self.evidence, key=lambda item: item["id"])
         }
         return {
+            **({"code_paths": self.code_paths} if self.code_paths else {}),
+            **({"instruction_documents": self.instruction_documents} if self.instruction_documents else {}),
             "source_files": self.source_files,
             "metadata": {
                 "schema_version": 1,
@@ -253,6 +258,17 @@ class ReviewModel:
         changes_by_path = {item["path"]: item for item in self.changes}
         coverage = {item["path"]: item for item in self.coverage["files"]}
         changed_coverage = self.coverage.get("changed_lines", {})
+        metric_lines = {
+            path: (
+                sorted(set(changed_coverage.get(path, {}).get("covered_lines", []))),
+                sorted(set(changed_coverage.get(path, {}).get("uncovered_lines", []))),
+                sorted(set(coverage.get(path, {}).get("executable_lines", []))),
+                sorted(set(coverage.get(path, {}).get("covered_lines", []))),
+                sorted(set(changes_by_path.get(path, {}).get("added_lines", []))),
+                sorted(set(changes_by_path.get(path, {}).get("removed_lines", []))),
+            )
+            for path in changes_by_path.keys() | coverage.keys() | changed_coverage.keys()
+        }
         modules = {item["name"]: item for item in self.aggregates["modules"]}
         component_ids = {
             item["name"]: item["id"] for item in self.aggregates["components"]
@@ -277,42 +293,28 @@ class ReviewModel:
             return direct, sorted(visited - set(direct))
 
         def metrics(path: str | None, start: int | None = None, end: int | None = None) -> dict[str, Any]:
-            file_coverage = coverage.get(path or "", {})
-            changed = changed_coverage.get(path or "", {})
-            covered_lines = set(changed.get("covered_lines", []))
-            uncovered_lines = set(changed.get("uncovered_lines", []))
-            if start is not None and end is not None:
-                covered_lines = {line for line in covered_lines if start <= line <= end}
-                uncovered_lines = {line for line in uncovered_lines if start <= line <= end}
-            executable_lines = set(file_coverage.get("executable_lines", []))
-            file_covered_lines = set(file_coverage.get("covered_lines", []))
-            if start is not None and end is not None:
-                executable_lines = {line for line in executable_lines if start <= line <= end}
-                file_covered_lines = {line for line in file_covered_lines if start <= line <= end}
-            executable_count = len(executable_lines)
-            covered_count = len(file_covered_lines)
-            file_change = changes_by_path.get(path or "", {})
-            added_lines = set(file_change.get("added_lines", []))
-            removed_lines = set(file_change.get("removed_lines", []))
-            if start is not None and end is not None:
-                added_lines = {line for line in added_lines if start <= line <= end}
-                removed_lines = {line for line in removed_lines if start <= line <= end}
+            counts = [
+                max(0, bisect_right(lines, end) - bisect_left(lines, start))
+                if start is not None and end is not None else len(lines)
+                for lines in metric_lines.get(path or "", ((), (), (), (), (), ()))
+            ]
+            covered_lines, uncovered_lines, executable_count, covered_count, added_lines, removed_lines = counts
             return {
                 "complexity_base": None,
                 "complexity_current": None,
                 "signature_base": None,
                 "signature_current": None,
                 "coverage_percent": round(100 * covered_count / executable_count, 2) if executable_count else None,
-                "changed_lines_total": len(covered_lines) + len(uncovered_lines),
-                "changed_lines_covered": len(covered_lines),
-                "changed_lines_uncovered": len(uncovered_lines),
+                "changed_lines_total": covered_lines + uncovered_lines,
+                "changed_lines_covered": covered_lines,
+                "changed_lines_uncovered": uncovered_lines,
                 "changed_lines_coverage_percent": (
-                    round(100 * len(covered_lines) / (len(covered_lines) + len(uncovered_lines)), 2)
+                    round(100 * covered_lines / (covered_lines + uncovered_lines), 2)
                     if covered_lines or uncovered_lines else None
                 ),
-                "lines_added": len(added_lines),
-                "lines_removed": len(removed_lines),
-                "lines_changed": len(added_lines) + len(removed_lines),
+                "lines_added": added_lines,
+                "lines_removed": removed_lines,
+                "lines_changed": added_lines + removed_lines,
                 "churn_commits_90d": int(churn.get(path or "", {}).get("commits", 0)),
                 "churn_additions_90d": int(churn.get(path or "", {}).get("additions", 0)),
                 "churn_deletions_90d": int(churn.get(path or "", {}).get("deletions", 0)),
@@ -362,7 +364,8 @@ class ReviewModel:
                 "id": module["id"], "type": "module", "name": module.get("display_name", module["name"]),
                 "parent_id": component_id, "module_id": module["id"],
                 "component_id": component_id, "path": module["path"],
-                "start_line": 1, "end_line": self._line_count(module["path"]),
+                "start_line": 1, "end_line": int(changes_by_path.get(module["path"], {}).get("current_lines")
+                    or changes_by_path.get(module["path"], {}).get("baseline_lines") or 0),
                 "change": module["change"], "metrics": metrics(module["path"]),
                 "signatures": {"base": None, "current": None},
                 **_symbol_metadata(module),

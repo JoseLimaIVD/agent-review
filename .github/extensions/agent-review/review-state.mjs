@@ -1,10 +1,12 @@
 import { execFile } from "node:child_process";
+import { constants as bufferConstants } from "node:buffer";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { gunzipSync } from "node:zlib";
 import { assessPackageRisk } from "./package-risk.mjs";
 import { assessNpmPackageRisk } from "./node-package-risk.mjs";
 import { assessGoModuleRisk } from "./go-package-risk.mjs";
@@ -32,6 +34,7 @@ import { ExplanationValidationError } from "./ai-response.mjs";
 import { groupFindings } from "./web/findings.mjs";
 import { buildReviewPlan, concernPriorities } from "./web/review-plan.mjs";
 import { ANNOTATION_PROMPT_VERSION } from "./ai-prompts.mjs";
+import { DocumentRoleStore, effectiveDocuments, instructionContext } from "./markdown-context.mjs";
 
 // Item explanations written by an older prompt are dropped so the next view regenerates them; the change overview and
 // layer summaries have their own lifecycles and are kept.
@@ -204,7 +207,11 @@ export function runAnalyzerProcess(executable, args, onProgress = () => {}, opti
                 return;
             }
             try {
-                resolve(restoreSharedBaselines(JSON.parse(Buffer.concat(stdout).toString("utf8"))));
+                const output = Buffer.concat(stdout);
+                const json = options.gzip
+                    ? gunzipSync(output, { maxOutputLength: bufferConstants.MAX_STRING_LENGTH }).toString("utf8")
+                    : output.toString("utf8");
+                resolve(restoreSharedBaselines(JSON.parse(json)));
             } catch (error) {
                 reject(new Error(`Analyzer returned invalid JSON: ${error.message}`));
             }
@@ -224,13 +231,13 @@ export function restoreSharedBaselines(model) {
 }
 
 export async function runAnalyzer(repoRoot, baseRef, onProgress, currentRef = null, options = {}) {
-    const args = [analyzerPath, "--repo", repoRoot];
+    const args = [analyzerPath, "--repo", repoRoot, "--gzip"];
     if (baseRef) args.push("--base-ref", baseRef);
     if (currentRef) args.push("--current-ref", currentRef);
     const failures = [];
     for (const [executable, prefix] of pythonCandidates()) {
         try {
-            return await runAnalyzerProcess(executable, [...prefix, ...args], onProgress, options);
+            return await runAnalyzerProcess(executable, [...prefix, ...args], onProgress, { ...options, gzip: true });
         } catch (error) {
             options.signal?.throwIfAborted();
             if (error.code !== "ENOENT") throw error;
@@ -266,6 +273,8 @@ export function attachCoverage(map, model) {
 }
 
 export async function runDecisionExtractor(request, options = {}) {
+    options.signal?.throwIfAborted();
+    if (request.precomputed) return { ...request.precomputed, adapter_id: request.adapter_id };
     const directory = await mkdtemp(join(tmpdir(), "agent-review-decisions-"));
     const input = join(directory, "request.json");
     try {
@@ -328,6 +337,8 @@ export class ReviewState {
         this.worktreeMonitorOwners = 0;
         this.workspacePath = options.workspacePath;
         this.reviewProgressStore = new ReviewProgressStore(this.workspacePath);
+        this.documentRoleStore = new DocumentRoleStore(this.workspacePath);
+        this.documentRoles = null;
         this.adoClient = options.adoClient;
         this.runTargetCommand = options.runTargetCommand;
         this.reviewDraftStore = new ReviewDraftStore(this.workspacePath);
@@ -685,8 +696,63 @@ export class ReviewState {
             decision_map: this.decisionMap,
             test_run: this.testRun ? { ...this.testRun, stale: this.testRun.status === "complete" && this.testRunStale() } : null,
             rule_check: this.ruleCheck,
+            document_roles: this.documentRoles?.snapshot === (this.model && reviewSnapshotKey(this.model, this.reviewTarget))
+                ? this.documentRoles : null,
             discussion_update: this.discussionUpdate,
         };
+    }
+
+    async rolesForReview() {
+        if (!this.model) throw new Error("No saved review is available.");
+        const model = this.model, target = this.reviewTarget;
+        const snapshot = reviewSnapshotKey(model, target);
+        const record = await this.documentRoleStore.read(snapshot);
+        if (this.model !== model || this.reviewTarget !== target) throw new Error("The review changed while loading document roles.");
+        if (this.documentRoles?.snapshot === snapshot && this.documentRoles.revision > record.revision) {
+            throw new Error("Document roles changed while loading. Retry to read the latest saved revision.");
+        }
+        const changed = this.documentRoles?.snapshot === snapshot && this.documentRoles.revision !== record.revision;
+        if (changed) {
+            this.invalidateDocumentInterpretations();
+        }
+        this.documentRoles = record;
+        model.instruction_role_overrides = record.overrides;
+        if (changed) this.broadcast("document-roles");
+        return { ...record, documents: {
+            base: effectiveDocuments(model.instruction_documents?.base, record.overrides),
+            current: effectiveDocuments(model.instruction_documents?.current, record.overrides),
+        } };
+    }
+
+    invalidateDocumentInterpretations() {
+        this.stopInternalReviews();
+        this.reviewGeneration += 1;
+        this.annotations = {};
+        this.annotationPromises = new Map();
+        this.reviewEvidence = null;
+        this.reviewEvidenceModel = null;
+        this.ruleCheck = null;
+        this.customAnalyses = {};
+        this.customAnalysisPromises = new WeakMap();
+        this.discussionSnapshots = new WeakMap();
+    }
+
+    async correctDocumentRole(input) {
+        if (!this.model || this.loading) throw new Error("Wait for a saved review before correcting roles.");
+        const model = this.model, target = this.reviewTarget;
+        const snapshot = reviewSnapshotKey(model, target);
+        if (input?.snapshot !== snapshot || !["base", "current"].some((side) =>
+            Object.hasOwn(model.instruction_documents?.[side]?.documents || {}, input.path))) {
+            throw new Error("The document correction does not belong to this saved snapshot.");
+        }
+        const record = await this.documentRoleStore.update(snapshot, input.revision, input.path, input.role);
+        if (this.model !== model || this.reviewTarget !== target) throw new Error("The saved correction belongs to the previous review; reload its roles.");
+        this.invalidateDocumentInterpretations();
+        this.documentRoles = record;
+        model.instruction_role_overrides = record.overrides;
+        const result = await this.rolesForReview();
+        this.broadcast("document-roles");
+        return result;
     }
 
     subscribe(listener) {
@@ -904,6 +970,7 @@ export class ReviewState {
                 signal.throwIfAborted();
                 if (this.activeRun !== run) throw new Error("The review changed during analysis.");
                 this.model = model;
+                await this.rolesForReview();
                 this.generatedObservations = this.generatedObservations.filter((observation) =>
                     observation.evidence_ids.every((id) => model.evidence?.[id])
                 );
@@ -1038,15 +1105,19 @@ export class ReviewState {
                 this.reviewGeneration += 1;
                 this.annotationPromises = new Map();
                 this.model = cached.model;
-                this.reviewEvidence = cached.reviewEvidence || null;
+                const cachedRoles = JSON.stringify(cached.model.instruction_role_overrides || {});
+                await this.rolesForReview();
+                const rolesChanged = cachedRoles !== JSON.stringify(this.model.instruction_role_overrides);
+                this.reviewEvidence = rolesChanged ? null : cached.reviewEvidence || null;
                 this.reviewEvidenceModel = cached.model;
-                this.annotations = currentAnnotations(cached.annotations);
+                this.annotations = rolesChanged ? {} : currentAnnotations(cached.annotations);
+                if (rolesChanged) this.ruleCheck = null;
                 this.decisionMap = cached.decisionMap;
                 this.decisionPromise = cached.decisionMap ? Promise.resolve(cached.decisionMap) : null;
                 this.packageRisks = cached.packageRisks;
                 this.packageAssessments = cached.packageAssessments;
                 this.generatedObservations = cached.generatedObservations;
-                this.customAnalyses = cached.customAnalyses;
+                this.customAnalyses = rolesChanged ? {} : cached.customAnalyses;
                 this.customPromptError = null;
                 this.lastAnalyzedAt = cached.analyzedAt;
                 this.baseRef = cached.baseRef ?? this.worktreeBaseRef;
@@ -1106,7 +1177,7 @@ export class ReviewState {
         });
     }
 
-    // Runs after analysis completes so it never lengthens the repository scan.
+    // C# reuses the scan's compiler result; other adapters extract paths after the scan.
     startDecisionMap() {
         const model = this.model;
         this.decisionController?.abort();
@@ -1498,10 +1569,12 @@ export class ReviewState {
     }
 
     async internalReview(instruction, { sources = [], onProgress, force = false, scope = "rules" } = {}) {
+        await this.rolesForReview();
         const controller = new AbortController();
         controller.reviewScope = scope;
         this.reviewControllers.add(controller);
         const model = this.model;
+        const generation = this.reviewGeneration;
         const repoRoot = this.repoRoot;
         let runtime;
         try {
@@ -1521,7 +1594,7 @@ export class ReviewState {
                     if (!await git(repoRoot, ["ls-tree", "--name-only", sha, "--", path])) return null;
                     return git(repoRoot, ["show", `${sha}:${path}`]);
                 } });
-            if (scope === "rules" && this.model === model && !this.disposed) {
+            if (scope === "rules" && this.model === model && this.reviewGeneration === generation && !this.disposed) {
                 this.reviewEvidence = result;
                 this.reviewEvidenceModel = model;
                 this.reviewEvidenceRevision++;
@@ -1794,6 +1867,7 @@ export class ReviewState {
         return {
             item,
             subject,
+            instruction_context: instructionContext(this.model, subject?.path || item?.path, this.model.instruction_role_overrides),
             analysis_quality: {
                 coverage_available: Boolean(this.model.coverage?.available),
                 ...boundedAnalysisWarnings(this.model.warnings, subject?.path),
@@ -1856,6 +1930,7 @@ export class ReviewState {
     }
 
     async annotationFor(id, supplementalEvidenceIds = []) {
+        await this.rolesForReview();
         if (this.annotations[id]?.prompt_version === ANNOTATION_PROMPT_VERSION) return this.annotations[id];
         if (!this.generateAnnotation) throw new Error("Copilot annotation is unavailable.");
         if (this.annotationPromises.has(id)) return this.annotationPromises.get(id);
@@ -1875,7 +1950,7 @@ export class ReviewState {
             context.session_attribution = this.attributionForPath(attributionPath);
             context.session_intent = this.intentForReview(context.session_attribution).slice(-6);
             context.commit_intent = this.reviewTarget.intent || null;
-            context.code_context = await this.codeContextFor(context);
+            context.code_context = context.instruction_context ? null : await this.codeContextFor(context);
             if (context.related_edges.length > 40) {
                 context.analysis_quality.omitted_relationships = context.related_edges.length - 40;
                 context.related_edges = context.related_edges.slice(0, 40);
@@ -2096,6 +2171,9 @@ export class ReviewState {
         const savedCode = customAnalysisContext(model);
         return {
             kind: "overview",
+            instruction_documents: Object.fromEntries(Object.entries(effectiveDocuments(this.model.instruction_documents?.current,
+                this.model.instruction_role_overrides)).filter(([path]) => files.some((file) => file.path === path))
+                .slice(0, 30).map(([path, document]) => [path, { role: document.role, classification: document.classification }])),
             summary: model.summary,
             totals,
             files: files.slice(0, 30),

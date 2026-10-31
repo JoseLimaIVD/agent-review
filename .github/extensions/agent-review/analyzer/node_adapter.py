@@ -171,6 +171,11 @@ class NodeAdapter:
     def coverage(self, snapshot: AnalysisSnapshot) -> dict[str, Any]:
         if not _has_sources(snapshot.current):
             return {"available": False, "files": [], "changed_lines": {}}
+        inputs = ("coverage/sources.json", "coverage/coverage-final.json", "coverage/lcov.info",
+                  "coverage-final.json", "lcov.info")
+        if not any(path in snapshot.current or (not snapshot.historical and (snapshot.repo / path).is_file())
+                   for path in inputs):
+            return {"available": False, "files": [], "changed_lines": {}}
         try:
             return self._invoke("node-coverage.mjs", {
                 "repo": str(snapshot.repo), "baseline": _texts(snapshot.baseline),

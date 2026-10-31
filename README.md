@@ -1,7 +1,7 @@
 # Agent Review
 
 A GitHub Copilot Canvas extension for reviewing agent-made changes in Python,
-Node.js/TypeScript, C#/.NET, Go, and Rust repositories. Start with the change's intent and architecture,
+Node.js/TypeScript, C#/.NET, Go, Rust, and Markdown repositories. Start with the change's intent and architecture,
 then follow its impact down to findings, dependency evidence, and source diffs.
 
 [![Agent Review: change brief, architecture graph, attention queue, package changes, source diff, originating prompt, and AI briefing](docs/agent-review.png)](docs/agent-review.png)
@@ -48,7 +48,66 @@ The large sample's two failing tests are intentional; its guide identifies them.
 
 ## Features and insights
 
+### Review agent instructions
+
+Markdown reviews preserve both saved versions and parse headings, frontmatter,
+lists, links, fenced examples, and quotations into line-addressable evidence.
+Recognized entry points include `SKILL.md`, `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`,
+and Copilot instruction files. An explicit instruction to follow a local
+reference can establish its intended instruction role; a bare link establishes
+only supporting material. An imperative in an ordinary README does not turn it
+into an agent instruction.
+
+The **Evidence** pane shows the document role, its classification evidence,
+and incoming reference paths, with links to the correct saved source side.
+**Correct document role** saves a reviewer interpretation for this snapshot;
+**Reset to analyzer** removes it. Corrections persist in the session workspace
+and invalidate derived AI interpretations, not file-review decisions or source
+documents. Providers without a workspace explicitly identify memory-only storage.
+Conflicting saves are rejected rather than silently overwriting another tab.
+
+Markdown explanations compare prescribed obligations, evidence requirements,
+required stops, permissions, and conditional exceptions instead of inventing
+functions or callers. Supporting documents and quoted examples remain distinct
+from active rules. Missing local files and heading fragments are deterministic
+checks; contradictions and predicted failure scenarios are AI interpretations.
+No controlled agent evaluation is run by this adapter. Repository test results
+and code coverage do not measure instruction compliance.
+
+Bounded explanation context prioritizes changed lines from every diff hunk and
+the direct instruction that references the document. If changed source cannot
+fit, the context lists the omitted line ranges. Source citations identify the
+saved `base` or `current` version and open that side in the source viewer.
+
+References resolve only within each saved snapshot, never by fetching external
+URLs or executing embedded commands. Structure and relationship limits are
+reported as evidence gaps. Literal module-relative JavaScript file reads into
+an `instructions` field can establish intended supply; literal copy operations
+establish packaging only. Other dynamic loading contracts remain unverified.
+A reference, loader, or packaging step does not prove an agent received, read,
+or obeyed the document. Document precedence remains unknown without an explicit
+host or loading contract. Automatic instruction repair, arbitrary skill
+execution, and a general prompt-evaluation framework are outside this feature.
+
+Run Markdown regressions with
+`python -m unittest discover -s .github/extensions/agent-review/tests -p test_markdown_adapter.py`
+and `node --test .github/extensions/agent-review/tests/test-markdown.mjs`.
+The attributed Radius fixture records the upstream base/head revisions.
+For interactive real-repository coverage, set `AGENT_REVIEW_UX_REPO` and
+`AGENT_REVIEW_MARKDOWN_PATH` to an explicitly referenced changed instruction
+document, then run
+`node .github/extensions/agent-review/tests/browser/markdown-review.mjs`
+with the browser-tooling settings below. Controlled responses in this browser
+test exercise presentation, not semantic instruction compliance.
+
 ### Understand the change
+
+**Worktree** compares the saved working tree with the configured comparison
+base, not necessarily `HEAD`. A stale local `main` can therefore include years
+of committed history even in a clean worktree. Use `origin/main` for the current
+remote-tracking baseline, or `HEAD` to review only uncommitted changes, when
+that is the intended scope. Agent Review does not silently replace an explicit
+baseline.
 
 A compact Overview keeps **Start review** or **Continue review**, focused-queue
 progress, and access to every changed file in the first screen. Priority items
@@ -300,8 +359,10 @@ Attention cards distinguish deterministic **Review priority** signals from
 AI-supported concerns and review observations. Their concise previews retain
 the full underlying explanation and evidence. Source explanations lead with
 the behavioral change; supporting background is available under **Full
-explanation**. Section context follows its exact source ranges into the same
-evidence workspace.
+explanation**. Full explanation and Evidence remember each item's disclosure
+choices while background updates arrive and when you switch away and back.
+A new review snapshot resets those choices. Section context follows its exact
+source ranges into the same evidence workspace.
 
 Code explanations lead with the behavioral change, then walk through execution
 order, early exits, precedence, fallbacks, and a concrete source-derived example.
@@ -364,6 +425,11 @@ rules the change appears to violate and which rules are satisfied or not
 verifiable, citing rule and code lines. Select a rule file to open it with every
 cited section highlighted. Rule files are treated as evidence,
 never as instructions to the reviewer.
+
+Plain filename mentions supply supporting context only when they resolve to
+saved files, so directory diagrams and runtime configuration examples do not
+invent missing documents. Explicit local Markdown links are still checked for
+missing snapshot evidence.
 
 ### Large changes and internal review passes
 
@@ -627,6 +693,11 @@ For development or when the distribution is not yet available:
    npm ci --ignore-scripts --bin-links=false
    ```
 
+When updating a source installation, copy the changed runtime files and the
+rebuilt trusted Roslyn helper, then **reload extensions and reopen the canvas**.
+An existing canvas provider keeps its already-loaded JavaScript; retrying a
+failed review before reloading does not activate the new analyzer transport.
+
 The included `.npmrc` also disables executable links. Project extensions reject
 symbolic links, and Agent Review imports TypeScript directly without needing
 the `tsc` or `tsserver` command launchers.
@@ -692,6 +763,8 @@ standard Agent Review cache directory. `AGENT_REVIEW_DOTNET_CACHE` overrides
 that location. Content, compiler/extractor and parse configuration invalidate
 facts; semantic compilation, relationships and test links are rebuilt for
 each snapshot. `--no-cache` disables the scan's persistent .NET facts cache.
+C# code paths and test links are produced by that same compiler pass and
+reused by the provider. Long-running compiler work reports elapsed progress.
 
 Each saved C# snapshot supports up to **32 Mi source characters**. The helper's
 separate **128 Mi-character JSON request limit** accommodates both snapshots and
@@ -721,6 +794,21 @@ Malformed authoritative project/central manifests fail explicitly rather than
 being mistaken for package removals. Differing project pins remain visible in
 the saved declaration list; a grouped package does not acquire a guessed
 version-specific advisory result.
+Central-version manifests are indexed once per saved tree rather than
+rescanning every repository path for each project. Large review results use
+compressed analyzer transport, retaining complete saved source and evidence
+without hitting the 128 MiB uncompressed-output limit. The command-line
+analyzer still writes ordinary JSON by default; `--gzip` selects the compressed
+stream used by the provider. Scan progress identifies result serialization
+before reporting completion.
+Serialization uses complete-record buffers rather than one output write per
+JSON token, while preserving the same JSON data. Node coverage skips its
+snapshot transfer when neither saved nor eligible live report inputs exist;
+present reports still receive exact-source validation. Symbol line metrics
+use indexed line ranges instead of repeatedly rescanning whole-file changes.
+C# code-path requests retain saved compiler source and configuration only,
+matching the graph scan; unrelated assets and other languages are not copied
+into Roslyn's bounded input.
 
 Saved Coverlet **Cobertura XML** reports contribute line and branch evidence
 only for unambiguously matched C# snapshot paths. Reports must be tracked or
@@ -850,8 +938,11 @@ Returning to a target reuses its results while the provider remains running.
   remain reviewable as diffs. No findings is **not** a correctness guarantee;
   **Priority** ranks attention, not security.
 - Code path maps are static and cover changed, non-test callables in implemented languages
-  after analysis finishes, so they never lengthen the scan. They show conditions, not
+  and show conditions, not
   runtime reachability; very large reviews are bounded and labeled as partial.
+  C# graph and code paths share one Roslyn compilation pass; its saved path map
+  is reused after scanning instead of compiling the full snapshot twice.
+  Other language adapters extract paths after the graph scan.
 - Python worktree coverage accepts matching `coverage.json`, `coverage.xml`, or
   legacy JSON `.coverage` reports; a SQLite `.coverage` database alone is unsupported.
   Node coverage requires exact-source proof for supported Istanbul/LCOV reports;
@@ -1002,7 +1093,9 @@ It statically links `#[test]` functions through resolved saved-source calls.
 for each linked test. Configure `test_cargo` in `.agent-review.json` or
 `AGENT_REVIEW_TEST_CARGO` when Cargo is not on PATH. Worktree source hashes are
 rechecked before every test; commit/PR runs use the disposable exact-snapshot
-export. Runs are cancellable and report per-test outcomes. Cargo may download
+export. Rust test fingerprints ignore a leading UTF-8 BOM and normalize CRLF
+to LF, matching Rust source loading; all other source content must match.
+Runs are cancellable and report per-test outcomes. Cargo may download
 dependencies, compile and execute build scripts/procedural macros, build code,
 and execute repository tests; snapshot isolation is **not a sandbox**. Cargo
 outcomes do not provide per-path tracing, so inferred paths are not upgraded to
@@ -1124,7 +1217,7 @@ Implemented language adapters are **Python**, **Node.js/TypeScript**, **C#/.NET*
   `python_adapter.py` delegates to the existing Python implementations, resolving
   its graph in an isolated model before merging facts. Python DTOs and the
   content-cache namespace are preserved, so existing warm scans remain reusable.
-- `language-adapters.mjs` routes post-scan code-path requests and test runners.
+- `language-adapters.mjs` routes code-path requests and test runners.
   `python-review-adapter.mjs` owns Python callable/test linkage and the parser
   process specification; `node-review-adapter.mjs` routes the Node compiler,
   static linkage, and isolated `node:test` runner; `dotnet-review-adapter.mjs`
@@ -1143,8 +1236,9 @@ resolve against their snapshot's project configuration, version their fact
 caches, and return the existing evidence DTOs. Do not restore packages, build,
 or execute repository code during scanning. Combined execution of different
 languages' test runners is deliberately rejected until its plan/result contract
-is implemented; Python runs continue unchanged. Code-path extraction and test
-linkage still start only after scanning, and tests run only by explicit action.
+is implemented; Python runs continue unchanged. C# reuses code-path extraction
+and test linkage from its graph compiler pass; other adapters start that work
+after scanning. Tests run only by explicit action.
 
 The [analyzer](.github/extensions/agent-review/analyzer/analyze.py) also runs
 standalone with `--repo <repository>` and emits `ReviewModel` JSON. Override Python
@@ -1159,6 +1253,16 @@ node --test .github\extensions\agent-review\tests\test-*.mjs
 [Browser regressions](.github/extensions/agent-review/tests/browser/) use an
 existing `playwright-core` installation (`AGENT_REVIEW_BROWSER_PACKAGE`) and Edge
 on Windows, or `AGENT_REVIEW_BROWSER_EXECUTABLE` for another browser.
+
+Before merging changes to annotation rendering or Evidence-panel navigation,
+run `node .github/extensions/agent-review/tests/browser/annotation-updates.mjs`
+with those browser settings. This required pre-merge check covers background
+updates, cross-file citations and source Back, disclosure state, keyboard focus,
+and reading position in light/dark themes at desktop and narrow widths.
+The build workflow does not run this browser regression; passing CI alone
+does not satisfy this check. Set `AGENT_REVIEW_SCREENSHOT_DIR` to retain
+screenshots, and also verify the running canvas with real repository data as
+required by [AGENTS.md](AGENTS.md).
 
 The large-change regression suite is
 `node --test .github\extensions\agent-review\tests\test-review-pipeline.mjs`.

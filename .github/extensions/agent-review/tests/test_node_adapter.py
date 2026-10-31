@@ -265,12 +265,30 @@ class NodeAdapterTests(unittest.TestCase):
     def test_coverage_delegate_receives_historical_snapshot_text_and_repository(self):
         adapter = NodeAdapter()
         expected = {"available": False, "files": [], "changed_lines": {}}
+        current = {"a.ts": b"new", "coverage/sources.json": b"{}"}
         with patch.object(adapter, "_invoke", return_value=expected) as invoke:
-            self.assertIs(adapter.coverage(snapshot({"a.ts": b"old"}, {"a.ts": b"new"})), expected)
+            self.assertIs(adapter.coverage(snapshot({"a.ts": b"old"}, current)), expected)
         script, payload = invoke.call_args.args
         self.assertEqual(script, "node-coverage.mjs")
         self.assertEqual(payload, {"repo": ".", "baseline": {"a.ts": "old"},
-                                   "current": {"a.ts": "new"}, "historical": True})
+                                   "current": {path: raw.decode() for path, raw in current.items()}, "historical": True})
+
+    def test_missing_coverage_inputs_do_not_transfer_the_source_snapshot(self):
+        adapter = NodeAdapter()
+        with patch.object(adapter, "_invoke", side_effect=AssertionError("unnecessary snapshot transfer")):
+            self.assertEqual(adapter.coverage(snapshot(current={"a.ts": b"source"})),
+                             {"available": False, "files": [], "changed_lines": {}})
+
+    def test_worktree_coverage_probes_live_reports_but_historical_coverage_never_does(self):
+        adapter = NodeAdapter()
+        saved = snapshot(current={"a.ts": b"source"}, historical=False)
+        expected = {"available": True, "files": [], "changed_lines": {}}
+        with patch("pathlib.Path.is_file", return_value=True), patch.object(adapter, "_invoke", return_value=expected) as invoke:
+            self.assertIs(adapter.coverage(saved), expected)
+            self.assertFalse(invoke.call_args.args[1]["historical"])
+        with patch("pathlib.Path.is_file", side_effect=AssertionError("historical checkout read")), patch.object(adapter, "_invoke") as invoke:
+            self.assertFalse(adapter.coverage(snapshot(current={"a.ts": b"source"}))["available"])
+            invoke.assert_not_called()
 
     def test_real_coverage_cli_accepts_stdin_snapshot_without_live_reports(self):
         report = NODE_ADAPTER.coverage(snapshot(current={"app.ts": b"export function run(){}"}))

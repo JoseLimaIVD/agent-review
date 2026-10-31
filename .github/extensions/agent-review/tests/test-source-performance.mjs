@@ -1,13 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ReviewState } from "../review-state.mjs";
-import { startReviewServer } from "../server.mjs";
+import { browserSnapshot, startReviewServer } from "../server.mjs";
 
 const model = (value = "current") => ({
     metadata: { base_sha: "immutable-base" }, nodes: [], edges: [], attention: [], warnings: [],
     coverage: {}, changes: [], source_files: {
         "value.js": { current: `${value}\n`, baseline: "base\n", diff: `@@ -1 +1 @@\n-base\n+${value}\n` },
     },
+});
+
+test("browser snapshots omit internal precomputed code paths and saved source bodies", () => {
+    const saved = model();
+    saved.code_paths = { csharp: { callables: [{ id: "internal" }] } };
+    const snapshot = browserSnapshot({ model: saved, review_target: { mode: "worktree" } });
+    assert.equal(snapshot.model.code_paths, undefined);
+    assert.deepEqual(snapshot.model.source_files["value.js"], { binary: false });
+    assert.ok(saved.code_paths.csharp, "the provider retains the compiler result");
 });
 
 test("concurrent source selections reuse one immutable snapshot while preserving their own focus ranges", async () => {

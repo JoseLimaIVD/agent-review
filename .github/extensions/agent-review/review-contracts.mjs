@@ -69,6 +69,8 @@ export function repositoryRuleSources(model, { bounded = true } = {}) {
     const sources = [];
     for (const [path, saved] of Object.entries(model?.source_files || {})) {
         if (saved?.binary || typeof saved?.current !== "string" || !saved.current.trim()) continue;
+        if (Object.hasOwn(model.instruction_role_overrides || {}, path)
+            && model.instruction_role_overrides[path] !== "instructions") continue;
         const name = path.split("/").at(-1).toLowerCase();
         let kind = null;
         let applies = [];
@@ -113,7 +115,15 @@ export const RULES_PROMPT = [
     "Verification: for each remaining applicable rule, say Satisfied with evidence or Not verifiable and name the missing evidence, for example callers outside the supplied files.",
 ].join(" ");
 
-export function repositoryRuleReferences(sources, savedFiles) {
+export function repositoryRuleReferences(sources, savedFiles, markdownFacts = null) {
+    if (markdownFacts) {
+        const paths = new Set(sources.map((source) => source.path));
+        return (markdownFacts.relationships || []).filter((edge) => paths.has(edge.from) && edge.path
+            && (edge.kind !== "mentions" || Object.hasOwn(savedFiles, edge.path))
+            && !["external", "unsafe"].includes(edge.status)).map((edge) => ({
+            from: edge.from, path: edge.path, line: edge.line, kind: edge.kind, status: edge.status,
+        }));
+    }
     const references = new Map();
     for (const source of sources) {
         const links = [...source.text.matchAll(/\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)];
@@ -123,6 +133,8 @@ export function repositoryRuleReferences(sources, savedFiles) {
             const path = relative || !savedFiles[reference]
                 ? posix.normalize(posix.join(posix.dirname(source.path), reference)) : reference;
             if (path === ".." || path.startsWith("../") || posix.isAbsolute(path) || path.includes("\\")) return;
+            // Plain filenames may be directory-tree leaves or runtime examples, not required documents.
+            if (!relative && !savedFiles[path]) return;
             references.set(`${source.path}:${path}`, { from: source.path, path });
         };
         for (const link of links) add(link[1], true);

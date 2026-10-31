@@ -206,6 +206,31 @@ internal static class SelfTests
                 "accessor decisions and semantic test reads use property identity");
             Check(syntaxTests.Edges.Any(e => e.Kind == "reads" && e.Target.EndsWith("P:Lib.Api.Number", StringComparison.Ordinal)) &&
                 syntaxTests.Edges.All(e => e.Kind != "uses_package"), "property evidence resolved; namespaces do not imply package dependencies");
+            var propertyFiles = new Dictionary<string, string>
+            {
+                ["App.csproj"] = "<Project><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>",
+                ["Properties.cs"] = """
+                    interface IValue { int Value { get; } }
+                    class Values : IValue {
+                        int IValue.Value => 1;
+                        public int @event { get; set; }
+                        public int this[int index] => index;
+                        public int Read(Values other) {
+                            @event = 2;
+                            return other?.@event ?? ((IValue)this).Value + this[0] + @event;
+                        }
+                    }
+                    """
+            };
+            var properties = Analyzer.Analyze(new Request(new(), propertyFiles, Mode: "graph"));
+            foreach (var name in new[] { "IValue.Value", "Values.IValue.Value", "Values.@event", "Values.this[int]" })
+            {
+                var property = properties.Symbols.Single(s => s.Kind == "property" && s.Qualname == name);
+                Check(name == "Values.IValue.Value" || properties.Edges.Any(e => e.Target == property.Id && e.Kind == "reads"),
+                    $"property name filter preserves escaped, interface, conditional and indexer reads: {name}");
+            }
+            Check(properties.Edges.Any(e => e.Kind == "writes" && e.Target.Contains("event", StringComparison.Ordinal)),
+                "escaped property writes preserved");
             var assertionFiles = new Dictionary<string, string>(testProjectFiles)
             {
                 ["lib/Widget.cs"] = """

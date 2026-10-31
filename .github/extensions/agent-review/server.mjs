@@ -12,9 +12,10 @@ export function browserSnapshot(snapshot) {
     const target = JSON.stringify(snapshot.review_target);
     let cached = browserModels.get(model);
     if (!cached || cached.target !== target) {
+        const { code_paths, ...browserModel } = model;
         const sources = Object.fromEntries(Object.entries(model.source_files || {}).map(([path, source]) =>
             [path, { binary: Boolean(source.binary) }]));
-        cached = { target, value: { ...model, source_files: sources,
+        cached = { target, value: { ...browserModel, source_files: sources,
             review_snapshot_key: reviewSnapshotKey(model, snapshot.review_target) } };
         browserModels.set(model, cached);
     }
@@ -320,6 +321,14 @@ export function startReviewServer(state, options = {}) {
                     ok: true,
                     annotation: await state.annotationFor(input.id, Array.isArray(input.evidence_ids) ? input.evidence_ids : []),
                 });
+                return;
+            }
+            if (req.method === "GET" && pathname === "/api/document-roles") {
+                sendJson(res, { ok: true, roles: await state.rolesForReview() });
+                return;
+            }
+            if (req.method === "POST" && pathname === "/api/document-roles") {
+                sendJson(res, { ok: true, roles: await state.correctDocumentRole(await readJson(req)) });
                 return;
             }
             if (req.method === "POST" && pathname === "/api/overview") {

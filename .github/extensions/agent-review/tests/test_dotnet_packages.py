@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sys
 import unittest
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "analyzer"))
@@ -16,6 +16,46 @@ def project(name: str = "Newtonsoft.Json", version: str = "13.0.3") -> bytes:
 
 
 class DotnetPackageTests(unittest.TestCase):
+    def test_central_lookup_is_linear_in_snapshot_paths_not_projects_times_paths(self) -> None:
+        files = {
+            "Directory.Packages.props": b'<Project><ItemGroup><PackageVersion Include="Demo" Version="1.0"/></ItemGroup></Project>',
+            **{f"src/area{index}/App/App.csproj": b'<Project><ItemGroup><PackageReference Include="Demo"/></ItemGroup></Project>'
+               for index in range(20)},
+            **{f"unrelated/area{index}/data.txt": b"not a manifest" for index in range(1000)},
+        }
+        calls = 0
+
+        def count_path(path: str) -> PurePosixPath:
+            nonlocal calls
+            calls += 1
+            return PurePosixPath(path)
+
+        with patch("dotnet_packages.PurePosixPath", new=count_path):
+            records = parse_dotnet_packages(files)
+        self.assertEqual(20, len(records))
+        self.assertTrue(all(item["resolved_version"] == "1.0" for item in records))
+        self.assertLess(calls, 3 * len(files), "central lookup must not rescan unrelated snapshot paths per project or ancestor")
+
+    def test_nearest_malformed_central_manifest_does_not_fall_back_to_parent(self) -> None:
+        warnings = []
+        item = parse_dotnet_packages({
+            "Directory.Packages.props": b'<Project><ItemGroup><PackageVersion Include="Demo" Version="1.0"/></ItemGroup></Project>',
+            "src/Directory.Packages.props": b"<Project>",
+            "src/App/App.csproj": b'<Project><ItemGroup><PackageReference Include="Demo"/></ItemGroup></Project>',
+        }, warnings)[0]
+        self.assertNotIn("resolved_version", item)
+        self.assertIn("nearest central manifest is malformed", item["resolution_error"])
+        self.assertTrue(any("src/Directory.Packages.props: cannot parse" in warning for warning in warnings))
+
+    def test_central_manifest_case_collision_retains_sorted_precedence(self) -> None:
+        item = parse_dotnet_packages({
+            "directory.packages.props": b'<Project><ItemGroup><PackageVersion Include="Demo" Version="2.0"/></ItemGroup></Project>',
+            "Directory.Packages.props": b'<Project><ItemGroup><PackageVersion Include="Demo" Version="1.0"/></ItemGroup></Project>',
+            "App.csproj": b'<Project><ItemGroup><PackageReference Include="Demo"/></ItemGroup></Project>',
+        })[0]
+        self.assertEqual("1.0", item["resolved_version"])
+        self.assertEqual("Directory.Packages.props", item["version_source"])
+
     def test_literal_namespace_child_version_and_saved_lines(self) -> None:
         records = parse_dotnet_packages({"App\\App.csproj": b'''<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
 <ItemGroup>
