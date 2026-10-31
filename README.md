@@ -302,8 +302,10 @@ Attention cards distinguish deterministic **Review priority** signals from
 AI-supported concerns and review observations. Their concise previews retain
 the full underlying explanation and evidence. Source explanations lead with
 the behavioral change; supporting background is available under **Full
-explanation**. Section context follows its exact source ranges into the same
-evidence workspace.
+explanation**. Full explanation and Evidence remember each item's disclosure
+choices while background updates arrive and when you switch away and back.
+A new review snapshot resets those choices. Section context follows its exact
+source ranges into the same evidence workspace.
 
 Code explanations lead with the behavioral change, then walk through execution
 order, early exits, precedence, fallbacks, and a concrete source-derived example.
@@ -1162,6 +1164,16 @@ node --test .github\extensions\agent-review\tests\test-*.mjs
 [Browser regressions](.github/extensions/agent-review/tests/browser/) use an
 existing `playwright-core` installation (`AGENT_REVIEW_BROWSER_PACKAGE`) and Edge
 on Windows, or `AGENT_REVIEW_BROWSER_EXECUTABLE` for another browser.
+
+Before merging changes to annotation rendering or Evidence-panel navigation,
+run `node .github/extensions/agent-review/tests/browser/annotation-updates.mjs`
+with those browser settings. This required pre-merge check covers background
+updates, cross-file citations and source Back, disclosure state, keyboard focus,
+and reading position in light/dark themes at desktop and narrow widths.
+The build workflow does not run this browser regression; passing CI alone
+does not satisfy this check. Set `AGENT_REVIEW_SCREENSHOT_DIR` to retain
+screenshots, and also verify the running canvas with real repository data as
+required by [AGENTS.md](AGENTS.md).
 
 The large-change regression suite is
 `node --test .github\extensions\agent-review\tests\test-review-pipeline.mjs`.
